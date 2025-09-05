@@ -152,7 +152,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (/^(picon|data):/i.test(u)) return null;
     if (u.startsWith('//')) u = 'https:' + u;
     if (/^\/t\/p\//i.test(u)) u = 'https://image.tmdb.org' + u;
-    else if (/^\/[a-z0-9]/i.test(u) && /\.(jpg|jpeg|png|webp)$/i.test(u)) u = 'https://image.tmdb.org/t/p/w342' + u;
     if (!/^https?:\/\//i.test(u)) u = 'http://' + u;
     return `/api/image?url=${encodeURIComponent(u)}`;
   }
@@ -200,7 +199,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const items = medias.map(m => {
         const type = guessTypeFrom(m);
-        const image = m.attributes['tvg-logo'] || m.attributes['logo'] || null;
+        const rawImg = m.attributes['tvg-logo'] || m.attributes['logo'] || null;
+        let image = rawImg;
+        if (rawImg && !/^(picon|data):/i.test(rawImg)) {
+          try { image = new URL(rawImg, playlistUrl).toString(); } catch {}
+        }
         const group = m.attributes['group-title'] || ((type === 'film' || type === 'serie') ? guessCategoryFrom(m.name, m.location) : 'Live');
         return { type, name: m.name || 'Stream', display: niceTitle(m.name || 'Stream'), image, url: m.location, group };
       });

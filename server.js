@@ -7,6 +7,7 @@ const compression = require('compression');
 const morgan = require('morgan');
 const path = require('path');
 const { URL } = require('url');
+const { Readable } = require('stream');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -19,9 +20,21 @@ app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] })
 
 /* -------------------- Helpers généraux -------------------- */
 
-// fetch wrapper (Node18 natif ; sinon node-fetch ESM)
+// fetch wrapper avec support des proxys (HTTP_PROXY / HTTPS_PROXY)
+let _fetchImpl = global.fetch;
+let _fetchDefaults = {};
+const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
+if (proxyUrl) {
+  try {
+    const { fetch: undiciFetch, ProxyAgent } = require('undici');
+    _fetchImpl = undiciFetch;
+    _fetchDefaults.dispatcher = new ProxyAgent(proxyUrl);
+  } catch (e) {
+    console.warn('Proxy agent non disponible', e.message);
+  }
+}
 async function fetchWrap(url, opts = {}) {
-  if (typeof fetch === 'function') return fetch(url, opts);
+  if (_fetchImpl) return _fetchImpl(url, { ..._fetchDefaults, ...opts });
   try {
     const { default: f } = await import('node-fetch');
     return f(url, opts);
@@ -59,9 +72,8 @@ function normUrl(u) {
   if (!u) return null;
   let s = String(u).trim();
   if (s.startsWith('//')) s = 'https:' + s;
-  // Chemins TMDB
+  // Chemins TMDB explicites
   if (/^\/t\/p\//i.test(s)) s = 'https://image.tmdb.org' + s;
-  else if (/^\/[a-z0-9]/i.test(s) && /\.(jpg|jpeg|png|webp)$/i.test(s)) s = 'https://image.tmdb.org/t/p/w342' + s;
   if (!/^https?:\/\//i.test(s)) s = 'http://' + s;
   return s;
 }
@@ -83,7 +95,12 @@ app.get('/api/image', async (req, res) => {
     res.setHeader('Cache-Control', 'public, max-age=86400');
 
     res.status(r.status);
-    r.body.pipe(res);
+    if (r.body) {
+      if (typeof r.body.pipe === 'function') r.body.pipe(res);
+      else Readable.fromWeb(r.body).pipe(res);
+    } else {
+      res.end();
+    }
   } catch (e) {
     console.error('image', e.message);
     res.status(404).send('img not found');
@@ -116,7 +133,11 @@ app.get('/api/m3u', async (req, res) => {
         const len = r.headers.get('content-length');
         if (len) res.setHeader('Content-Length', len);
         res.status(r.status);
-        return r.body.pipe(res);
+        if (r.body) {
+          if (typeof r.body.pipe === 'function') return r.body.pipe(res);
+          return Readable.fromWeb(r.body).pipe(res);
+        }
+        return res.end();
       }
       console.warn('get.php non accessible (status=', r.status, ') → fallback Xtream → M3U');
     } catch (e) {
@@ -162,11 +183,11 @@ async function generateM3UFromXtreamURL(rawUrl) {
       const list = await xtreamFetch(server, user, pass, `action=get_live_streams&category_id=${encodeURIComponent(cat.category_id)}`);
       for (const ch of list || []) {
         const name = ch.name || ch.stream_display_name || `Ch ${ch.stream_id}`;
-        const logo = ch.stream_icon || '';
+        const logo = joinUrl(server, ch.stream_icon || '');
         const group = cat.category_name || 'Live';
         const tvgId = ch.epg_channel_id || '';
         const url = `${server}/live/${encodeURIComponent(user)}/${encodeURIComponent(pass)}/${ch.stream_id}.${liveExt}`;
-        lines.push(`#EXTINF:-1 tvg-id="${tvgId}" tvg-name="${escapeExt(name)}" tvg-logo="${logo}" group-title="${escapeExt(group)}",${name}`);
+        lines.push(`#EXTINF:-1 tvg-id="${tvgId}" tvg-name="${escapeExt(name)}" tvg-logo="${escapeExt(logo)}" group-title="${escapeExt(group)}",${name}`);
         lines.push(url);
       }
       await sleep(15);
@@ -178,11 +199,11 @@ async function generateM3UFromXtreamURL(rawUrl) {
       const list = await xtreamFetch(server, user, pass, `action=get_vod_streams&category_id=${encodeURIComponent(cat.category_id)}`);
       for (const v of list || []) {
         const name = v.name || v.title || `Film ${v.stream_id}`;
-        const logo = v.stream_icon || v.cover || '';
+        const logo = joinUrl(server, v.stream_icon || v.cover || '');
         const ext = (v.container_extension || 'mp4').replace(/[^a-z0-9]/ig, '') || 'mp4';
         const group = `Films - ${cat.category_name || 'Divers'}`;
         const url = `${server}/movie/${encodeURIComponent(user)}/${encodeURIComponent(pass)}/${v.stream_id}.${ext}`;
-        lines.push(`#EXTINF:-1 tvg-logo="${logo}" group-title="${escapeExt(group)}",${name}`);
+        lines.push(`#EXTINF:-1 tvg-logo="${escapeExt(logo)}" group-title="${escapeExt(group)}",${name}`);
         lines.push(url);
       }
       await sleep(15);
@@ -264,7 +285,12 @@ app.get('/hls/seg', async (req, res) => {
     if (len) res.setHeader('Content-Length', len);
 
     res.status(r.status);
-    r.body.pipe(res);
+    if (r.body) {
+      if (typeof r.body.pipe === 'function') r.body.pipe(res);
+      else Readable.fromWeb(r.body).pipe(res);
+    } else {
+      res.end();
+    }
   } catch (e) {
     console.error('hls seg', e.message);
     res.status(502).send('hls seg failed');
@@ -291,7 +317,12 @@ app.get('/stream', async (req, res) => {
     }
 
     res.status(r.status);
-    r.body.pipe(res);
+    if (r.body) {
+      if (typeof r.body.pipe === 'function') r.body.pipe(res);
+      else Readable.fromWeb(r.body).pipe(res);
+    } else {
+      res.end();
+    }
   } catch (e) {
     console.error('stream', e.message);
     res.status(502).send('stream failed');
@@ -305,29 +336,29 @@ async function xtreamFetch(base, user, pass, qs = '') {
   if (!r.ok) throw new Error('xtream ' + r.status);
   return r.json();
 }
-function mapVodToItem(catName, s) {
+function mapVodToItem(catName, s, base) {
   return {
     type: 'film',
     name: s.name || s.title || `Film ${s.stream_id}`,
-    image: s.stream_icon || s.cover || null,
+    image: s.stream_icon ? joinUrl(base, s.stream_icon) : s.cover ? joinUrl(base, s.cover) : null,
     stream_id: s.stream_id,
     group: catName || 'Films'
   };
 }
-function mapSeriesToItem(catName, s) {
+function mapSeriesToItem(catName, s, base) {
   return {
     type: 'serie',
     name: s.name || s.title || `Série ${s.series_id}`,
-    image: s.cover || s.backdrop_path || null,
+    image: s.cover ? joinUrl(base, s.cover) : s.backdrop_path ? joinUrl(base, s.backdrop_path) : null,
     series_id: s.series_id,
     group: catName || 'Séries'
   };
 }
-function mapLiveToItem(catName, s, liveUrl) {
+function mapLiveToItem(catName, s, liveUrl, base) {
   return {
     type: 'tv',
     name: s.name || s.stream_display_name || `Ch ${s.stream_id}`,
-    image: s.stream_icon || null,
+    image: s.stream_icon ? joinUrl(base, s.stream_icon) : null,
     url: liveUrl,
     group: catName || 'Live'
   };
@@ -349,7 +380,7 @@ app.get('/api/xtream', async (req, res) => {
     const allFilms = [];
     for (const cat of vodCats || []) {
       const streams = await xtreamFetch(server, user, pass, `action=get_vod_streams&category_id=${encodeURIComponent(cat.category_id)}`);
-      for (const s of streams || []) allFilms.push(mapVodToItem(cat.category_name, s));
+      for (const s of streams || []) allFilms.push(mapVodToItem(cat.category_name, s, server));
       await sleep(30);
     }
 
@@ -358,7 +389,7 @@ app.get('/api/xtream', async (req, res) => {
     const allSeries = [];
     for (const cat of serCats || []) {
       const streams = await xtreamFetch(server, user, pass, `action=get_series&category_id=${encodeURIComponent(cat.category_id)}`);
-      for (const s of streams || []) allSeries.push(mapSeriesToItem(cat.category_name, s));
+      for (const s of streams || []) allSeries.push(mapSeriesToItem(cat.category_name, s, server));
       await sleep(30);
     }
 
@@ -383,7 +414,7 @@ app.get('/api/xtream_live', async (req, res) => {
       const streams = await xtreamFetch(server, user, pass, `action=get_live_streams&category_id=${encodeURIComponent(cat.category_id)}`);
       for (const s of streams || []) {
         const liveUrl = `${server}/live/${encodeURIComponent(user)}/${encodeURIComponent(pass)}/${s.stream_id}.m3u8`;
-        out.push(mapLiveToItem(cat.category_name, s, liveUrl));
+        out.push(mapLiveToItem(cat.category_name, s, liveUrl, server));
       }
       await sleep(20);
     }
