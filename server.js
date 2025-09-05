@@ -7,6 +7,7 @@ const compression = require('compression');
 const morgan = require('morgan');
 const path = require('path');
 const { URL } = require('url');
+const { Readable } = require('stream');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -19,9 +20,21 @@ app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] })
 
 /* -------------------- Helpers généraux -------------------- */
 
-// fetch wrapper (Node18 natif ; sinon node-fetch ESM)
+// fetch wrapper avec support des proxys (HTTP_PROXY / HTTPS_PROXY)
+let _fetchImpl = global.fetch;
+let _fetchDefaults = {};
+const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
+if (proxyUrl) {
+  try {
+    const { fetch: undiciFetch, ProxyAgent } = require('undici');
+    _fetchImpl = undiciFetch;
+    _fetchDefaults.dispatcher = new ProxyAgent(proxyUrl);
+  } catch (e) {
+    console.warn('Proxy agent non disponible', e.message);
+  }
+}
 async function fetchWrap(url, opts = {}) {
-  if (typeof fetch === 'function') return fetch(url, opts);
+  if (_fetchImpl) return _fetchImpl(url, { ..._fetchDefaults, ...opts });
   try {
     const { default: f } = await import('node-fetch');
     return f(url, opts);
@@ -83,7 +96,12 @@ app.get('/api/image', async (req, res) => {
     res.setHeader('Cache-Control', 'public, max-age=86400');
 
     res.status(r.status);
-    r.body.pipe(res);
+    if (r.body) {
+      if (typeof r.body.pipe === 'function') r.body.pipe(res);
+      else Readable.fromWeb(r.body).pipe(res);
+    } else {
+      res.end();
+    }
   } catch (e) {
     console.error('image', e.message);
     res.status(404).send('img not found');
@@ -116,7 +134,11 @@ app.get('/api/m3u', async (req, res) => {
         const len = r.headers.get('content-length');
         if (len) res.setHeader('Content-Length', len);
         res.status(r.status);
-        return r.body.pipe(res);
+        if (r.body) {
+          if (typeof r.body.pipe === 'function') return r.body.pipe(res);
+          return Readable.fromWeb(r.body).pipe(res);
+        }
+        return res.end();
       }
       console.warn('get.php non accessible (status=', r.status, ') → fallback Xtream → M3U');
     } catch (e) {
@@ -264,7 +286,12 @@ app.get('/hls/seg', async (req, res) => {
     if (len) res.setHeader('Content-Length', len);
 
     res.status(r.status);
-    r.body.pipe(res);
+    if (r.body) {
+      if (typeof r.body.pipe === 'function') r.body.pipe(res);
+      else Readable.fromWeb(r.body).pipe(res);
+    } else {
+      res.end();
+    }
   } catch (e) {
     console.error('hls seg', e.message);
     res.status(502).send('hls seg failed');
@@ -291,7 +318,12 @@ app.get('/stream', async (req, res) => {
     }
 
     res.status(r.status);
-    r.body.pipe(res);
+    if (r.body) {
+      if (typeof r.body.pipe === 'function') r.body.pipe(res);
+      else Readable.fromWeb(r.body).pipe(res);
+    } else {
+      res.end();
+    }
   } catch (e) {
     console.error('stream', e.message);
     res.status(502).send('stream failed');
