@@ -45,7 +45,7 @@ async function fetchWrap(url, opts = {}) {
 async function tryFetch(url, opts = {}) {
   return fetchWrap(url, {
     redirect: 'follow',
-    headers: { 'User-Agent': 'Mozilla/5.0 (IPTV-Web-Player)' },
+    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36' },
     ...opts
   });
 }
@@ -113,7 +113,16 @@ app.get('/api/m3u', async (req, res) => {
     const src = req.query.url;
     if (!src) return res.status(400).send('missing url');
 
-    // 1) Tentative directe avec en-têtes “navigateur”
+    // Si lien Xtream get.php → on génère notre propre M3U (logos inclus)
+    const m3uFromXtream = await generateM3UFromXtreamURL(src);
+    if (m3uFromXtream) {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Content-Type', 'audio/x-mpegurl; charset=utf-8');
+      res.status(200).send(m3uFromXtream);
+      return;
+    }
+
+    // Sinon: proxy direct de la playlist
     let origin = '';
     try { origin = new URL(src).origin; } catch {}
     try {
@@ -139,18 +148,8 @@ app.get('/api/m3u', async (req, res) => {
         }
         return res.end();
       }
-      console.warn('get.php non accessible (status=', r.status, ') → fallback Xtream → M3U');
     } catch (e) {
-      console.warn('fetch get.php error, fallback Xtream → M3U:', e.message);
-    }
-
-    // 2) Fallback : si c’est une URL Xtream get.php
-    const m3uFromXtream = await generateM3UFromXtreamURL(src);
-    if (m3uFromXtream) {
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Content-Type', 'audio/x-mpegurl; charset=utf-8');
-      res.status(200).send(m3uFromXtream);
-      return;
+      console.warn('fetch playlist error:', e.message);
     }
 
     return res.status(502).send('playlist fetch failed');
@@ -209,7 +208,32 @@ async function generateM3UFromXtreamURL(rawUrl) {
       await sleep(15);
     }
 
-    // (On n’inclut pas toutes les séries pour garder la playlist légère.)
+    // SÉRIES (toutes les saisons/épisodes)
+    const serCats = await xtreamFetch(server, user, pass, 'action=get_series_categories');
+    for (const cat of serCats || []) {
+      const seriesList = await xtreamFetch(server, user, pass, `action=get_series&category_id=${encodeURIComponent(cat.category_id)}`);
+      for (const s of seriesList || []) {
+        const info = await xtreamFetch(server, user, pass, `action=get_series_info&series_id=${encodeURIComponent(s.series_id)}`);
+        const logo = joinUrl(server, s.cover || s.backdrop_path || '');
+        const group = `Séries - ${cat.category_name || 'Divers'}`;
+        const eps = info?.episodes || {};
+        for (const seasonKey of Object.keys(eps)) {
+          const episodes = eps[seasonKey] || [];
+          for (const ep of episodes) {
+            const eid = ep.id || ep.episode_id || ep.id_episode || ep.series_id;
+            const ext = (ep.container_extension || 'mp4').replace(/[^a-z0-9]/ig, '') || 'mp4';
+            const epNum = ep.episode_num || ep.episode || 1;
+            const name = `${s.name || 'Serie'} S${String(seasonKey).padStart(2,'0')}E${String(epNum).padStart(2,'0')} - ${ep.title || ''}`;
+            const url = `${server}/series/${encodeURIComponent(user)}/${encodeURIComponent(pass)}/${eid}.${ext}`;
+            lines.push(`#EXTINF:-1 tvg-logo="${escapeExt(logo)}" group-title="${escapeExt(group)}",${escapeExt(name)}`);
+            lines.push(url);
+          }
+          await sleep(15);
+        }
+        await sleep(30);
+      }
+    }
+
     return lines.join('\n');
   } catch (e) {
     console.error('generateM3UFromXtreamURL', e.message);
