@@ -152,7 +152,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (/^(picon|data):/i.test(u)) return null;
     if (u.startsWith('//')) u = 'https:' + u;
     if (/^\/t\/p\//i.test(u)) u = 'https://image.tmdb.org' + u;
-    else if (/^\/[a-z0-9]/i.test(u) && /\.(jpg|jpeg|png|webp)$/i.test(u)) u = 'https://image.tmdb.org/t/p/w342' + u;
     if (!/^https?:\/\//i.test(u)) u = 'http://' + u;
     return `/api/image?url=${encodeURIComponent(u)}`;
   }
@@ -200,9 +199,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const items = medias.map(m => {
         const type = guessTypeFrom(m);
-        const image = m.attributes['tvg-logo'] || m.attributes['logo'] || null;
+        const rawImg = m.attributes['tvg-logo'] || m.attributes['logo'] || null;
+        let image = rawImg;
+        if (rawImg && !/^(picon|data):/i.test(rawImg)) {
+          try { image = new URL(rawImg, playlistUrl).toString(); } catch {}
+        }
+        let url = m.location;
+        try { url = new URL(m.location, playlistUrl).toString(); } catch {}
         const group = m.attributes['group-title'] || ((type === 'film' || type === 'serie') ? guessCategoryFrom(m.name, m.location) : 'Live');
-        return { type, name: m.name || 'Stream', display: niceTitle(m.name || 'Stream'), image, url: m.location, group };
+        return { type, name: m.name || 'Stream', display: niceTitle(m.name || 'Stream'), image, url, group };
       });
       if (!items.length) { setProgress(pWrap, pBar, pNum, pText, 100, 'Terminé'); statusMsg.textContent = 'Aucun élément trouvé dans cette playlist.'; hideProgress(pWrap); return; }
 
@@ -341,7 +346,14 @@ document.addEventListener('DOMContentLoaded', () => {
           play.addEventListener('click', (e)=>{ e.stopPropagation(); playStream(it.url, it.display || it.name); });
           card.appendChild(play);
         } else if (it.type === 'serie') {
-          card.addEventListener('click', () => openSeries(it));
+          if (lastXtreamCreds && it.series_id) {
+            card.addEventListener('click', () => openSeries(it));
+          } else if (it.url) {
+            card.addEventListener('click', () => playStream(it.url, it.display || it.name));
+            const play = document.createElement('button'); play.className='play'; play.innerHTML='<i class="fas fa-play"></i>';
+            play.addEventListener('click', (e)=>{ e.stopPropagation(); playStream(it.url, it.display || it.name); });
+            card.appendChild(play);
+          }
         }
         rc.appendChild(card);
       }
