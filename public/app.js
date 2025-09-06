@@ -145,15 +145,23 @@ document.addEventListener('DOMContentLoaded', () => {
     return 'tv';
   }
 
+  function resolveImageUrl(raw, base) {
+    if (!raw) return null;
+    let u = String(raw).trim();
+    if (u.toLowerCase().startsWith('picon:')) {
+      u = u.slice(6);
+    }
+    try {
+      return new URL(u, base).toString();
+    } catch {
+      return u;
+    }
+  }
+
   // Proxy images robuste
   function proxiedImage(rawUrl) {
     if (!rawUrl) return null;
-    let u = String(rawUrl).trim();
-    if (/^(picon|data):/i.test(u)) return null;
-    if (u.startsWith('//')) u = 'https:' + u;
-    if (/^\/t\/p\//i.test(u)) u = 'https://image.tmdb.org' + u;
-    if (!/^https?:\/\//i.test(u)) u = 'http://' + u;
-    return `/api/image?url=${encodeURIComponent(u)}`;
+    return `/api/image?url=${encodeURIComponent(rawUrl)}`;
   }
 
   // --------- Connexion M3U ----------
@@ -197,16 +205,13 @@ document.addEventListener('DOMContentLoaded', () => {
       setProgress(pWrap, pBar, pNum, pText, 72, 'Analyse de la playlist…');
       const medias = parseM3U(text, frac => setProgress(pWrap, pBar, pNum, pText, 70 + Math.floor(15 * frac), 'Analyse de la playlist…'));
 
-      const items = medias.map(m => {
-        const type = guessTypeFrom(m);
-        const rawImg = m.attributes['tvg-logo'] || m.attributes['logo'] || null;
-        let image = rawImg;
-        if (rawImg && !/^(picon|data):/i.test(rawImg)) {
-          try { image = new URL(rawImg, playlistUrl).toString(); } catch {}
-        }
-        const group = m.attributes['group-title'] || ((type === 'film' || type === 'serie') ? guessCategoryFrom(m.name, m.location) : 'Live');
-        return { type, name: m.name || 'Stream', display: niceTitle(m.name || 'Stream'), image, url: m.location, group };
-      });
+        const items = medias.map(m => {
+          const type = guessTypeFrom(m);
+          const rawImg = m.attributes['tvg-logo'] || m.attributes['logo'] || null;
+          const image = resolveImageUrl(rawImg, playlistUrl);
+          const group = m.attributes['group-title'] || ((type === 'film' || type === 'serie') ? guessCategoryFrom(m.name, m.location) : 'Live');
+          return { type, name: m.name || 'Stream', display: niceTitle(m.name || 'Stream'), image, url: m.location, group };
+        });
       if (!items.length) { setProgress(pWrap, pBar, pNum, pText, 100, 'Terminé'); statusMsg.textContent = 'Aucun élément trouvé dans cette playlist.'; hideProgress(pWrap); return; }
 
       setProgress(pWrap, pBar, pNum, pText, 100, 'Terminé');
