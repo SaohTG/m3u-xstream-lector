@@ -10,33 +10,28 @@ services:
     networks:
       - appnet
 
-  api:
-    build: ./backend
-    depends_on:
-      - db
-    environment:
-      DATABASE_URL: postgres://iptv:iptv@db:5432/iptvapp
-      JWT_SECRET: supersecret_change_me
-      TMDB_API_KEY: "d8175301037c00f3c719478998396539"
-      API_PORT: "4000"
-      NODE_ENV: development
-    # on n'expose plus le port 4000 publiquement, on passe par le proxy nginx
-    # ports:
-    #   - "4000:4000"
-    networks:
-      - appnet
-
   web:
-    build:
-      context: ./web
-      args:
-        VITE_API_URL: "/api"   # IMPORTANT : chaîne => routes front -> /api/*
-    depends_on:
-      - api
-    ports:
-      - "8080:80"
-    networks:
-      - appnet
+  build:
+    context: ./web
+    args:
+      VITE_API_URL: "/api"
+      BUILD_ID: "cache-bust-1"   # <— ajoute un ARG pour casser le cache
+  depends_on: [api]
+  ports:
+    - "8080:80"
+
+api:
+  build: ./backend
+  depends_on: [db]
+  environment:
+    DATABASE_URL: postgres://iptv:iptv@db:5432/iptvapp
+    JWT_SECRET: supersecret_change_me
+    TMDB_API_KEY: "d8175301037c00f3c719478998396539"
+    API_PORT: "4000"
+    NODE_ENV: development
+  # ports:            # <— laisse COMMENTÉ pour ne pas exposer 4000
+  #   - "4000:4000"
+
 
 volumes:
   db_data:
