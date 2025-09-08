@@ -15,7 +15,6 @@ export default function Auth() {
     try {
       const path = mode === 'login' ? '/auth/login' : '/auth/signup';
       const res = await api(path, { method:'POST', body: { email, password } });
-      // compat: accessToken | token
       const token = res?.accessToken || res?.token || res?.access || '';
       if (!token) throw new Error('Token manquant dans la réponse');
       setToken(token);
@@ -26,7 +25,7 @@ export default function Auth() {
   }
 
   return (
-    <div style={{maxWidth:420,margin:'64px auto'}}>
+    <div style={{maxWidth:420,margin:'64px auto', color:'#eee', fontFamily:'system-ui, sans-serif'}}>
       <h1>Connexion</h1>
       <div style={{display:'flex',gap:8,marginBottom:16}}>
         <button onClick={()=>setMode('login')} disabled={mode==='login'}>Se connecter</button>
@@ -38,7 +37,6 @@ export default function Auth() {
         <button type="submit">{mode==='login' ? 'Connexion' : 'Créer le compte'}</button>
         {err && <div style={{color:'tomato'}}>{err}</div>}
       </form>
-      <p style={{opacity:.7,marginTop:8}}>OAuth/2FA peuvent être ajoutés ensuite.</p>
     </div>
   );
 }
