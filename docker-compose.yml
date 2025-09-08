@@ -28,7 +28,7 @@ services:
       context: ./web
       args:
         # ⚠️ Mets ici l'IP OU LE DOMAINE de TON SERVEUR (pas localhost)
-        VITE_API_URL: "http://<IP_OU_DOMAINE_SERVEUR>:4000"
+        VITE_API_URL: "http://85.31.239.110:4000"
     depends_on:
       - api
     ports:
