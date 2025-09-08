@@ -36,7 +36,29 @@ export async function register(email: string, password: string, displayName?: st
   return data;
 }
 
-// ... imports + client + interceptors identiques
+client.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    const status = err?.response?.status;
+    const apiMsg =
+      err?.response?.data?.message ||
+      err?.message ||
+      'Erreur réseau';
+
+    // Log clair en console
+    console.error('[API ERROR]', status, apiMsg, err?.response?.data);
+
+    // 401/403 → déconnexion
+    if (status === 401 || status === 403) {
+      try { localStorage.removeItem('token'); } catch {}
+      if (!location.pathname.startsWith('/login')) location.replace('/login');
+    }
+
+    // Important: renvoyer un Error avec message explicite
+    return Promise.reject(new Error(apiMsg));
+  }
+);
+
 
 export async function parseM3U(url: string, signal?: AbortSignal) {
   const { data } = await client.post('/playlists/parse-m3u', { url }, { signal });
