@@ -2,16 +2,22 @@
 FROM node:20-alpine AS build
 WORKDIR /app
 
+# 1) Manifeste(s)
 COPY package.json package-lock.json* ./
+
+# 2) Config NPM + installation robuste (sans BuildKit)
 RUN npm config set fund false \
  && npm config set audit false \
  && npm config set progress false \
  && npm config set fetch-retries 5 \
  && npm config set fetch-timeout 600000 \
  && npm config set registry https://registry.npmjs.org/ \
- && --mount=type=cache,target=/root/.npm npm install --legacy-peer-deps --no-optional
+ && npm install --legacy-peer-deps --no-optional
 
+# 3) Code
 COPY . .
+
+# 4) Variables Vite + build
 ARG VITE_API_URL=/api
 ARG BUILD_ID=1
 ENV VITE_API_URL=${VITE_API_URL}
