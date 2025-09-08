@@ -2,7 +2,6 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 
-// Handlers globaux pour diagnostiquer
 window.addEventListener('unhandledrejection', (e) => {
   console.error('[Unhandled Promise]', e.reason);
 });
