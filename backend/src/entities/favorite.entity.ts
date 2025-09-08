@@ -1,18 +1,23 @@
-import { Entity, PrimaryGeneratedColumn, ManyToOne, CreateDateColumn, Column, Index } from 'typeorm';
-import { User } from './user.entity';
-import { MediaItem } from './media-item.entity';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  CreateDateColumn,
+  Column,
+  Index,
+} from 'typeorm';
 
-@Entity()
+@Entity('favorite')
+@Index(['userId', 'mediaId'], { unique: true })
 export class Favorite {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @ManyToOne(() => User, u => u.favorites, { onDelete: 'CASCADE' })
-  user!: User;
+  // plus de relation ManyToOne vers User
+  @Column({ type: 'uuid' })
+  userId!: string;
 
-  @Index()
-  @Column()
-  mediaId!: string; // reference to MediaItem.externalId
+  @Column({ type: 'uuid' })
+  mediaId!: string;
 
   @CreateDateColumn()
   createdAt!: Date;
