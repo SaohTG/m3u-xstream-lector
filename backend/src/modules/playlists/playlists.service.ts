@@ -63,6 +63,16 @@ export class PlaylistsService {
       }
 
       const items = this.parseM3UText(text);
+      const BATCH = 500;
+      for (let i = 0; i < items.length; i += BATCH) {
+        const slice = items.slice(i, i + BATCH).map(it => ({
+          title: it.title,
+          url: it.url,
+          type: it.type,
+          groupTitle: it.group
+        }));
+          await this.mediaRepo.upsert(slice, { conflictPaths: ['url'] }); // ← requiert url UNIQUE
+      }
 
       // Persistance (upsert par (url + title))
       // On peut d’abord regarder si certains existent déjà pour éviter les doublons.
