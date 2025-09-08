@@ -5,10 +5,7 @@ import { PlaylistsService } from './playlists.service';
 import { Media } from '../entities/media.entity';
 
 @Module({
-  imports: [
-    // ➜ rend Repository<Media> injectable dans ce module
-    TypeOrmModule.forFeature([Media]),
-  ],
+  imports: [TypeOrmModule.forFeature([Media])],
   controllers: [PlaylistsController],
   providers: [PlaylistsService],
   exports: [PlaylistsService],
