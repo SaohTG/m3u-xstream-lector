@@ -1,32 +1,39 @@
-import { Body, Controller, Post, Req, UseGuards } from '@nestjs/common';
-import { IsInt, IsString, Min, IsOptional } from 'class-validator';
-import { JwtGuard } from '../auth/jwt.guard';
-import { LibraryService } from './library.service';
-
-class ToggleFavoriteDto {
-  @IsString() mediaId!: string;
-  @IsOptional() @IsString() title?: string;
-  @IsOptional() @IsString() type?: string;
-  @IsOptional() @IsString() posterUrl?: string;
-}
-class ProgressDto {
-  @IsString() mediaId!: string;
-  @IsInt() @Min(0) position!: number;
-  @IsInt() @Min(0) duration!: number;
-}
+import { Controller, Get, Query } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Media } from '../entities/media.entity';
 
 @Controller('library')
-@UseGuards(JwtGuard)
 export class LibraryController {
-  constructor(private svc: LibraryService) {}
+  constructor(@InjectRepository(Media) private readonly mediaRepo: Repository<Media>) {}
 
-  @Post('favorites/toggle')
-  toggle(@Body() dto: ToggleFavoriteDto, @Req() req: any) {
-    return this.svc.toggleFavorite(req.user.id, dto.mediaId);
+  @Get('movies')
+  async movies(@Query('q') q?: string, @Query('page') page = 1, @Query('pageSize') pageSize = 48) {
+    const take = Math.min(200, Math.max(1, Number(pageSize)));
+    const skip = (Math.max(1, Number(page)) - 1) * take;
+    const qb = this.mediaRepo.createQueryBuilder('m').where('m.type = :t', { t: 'movie' });
+    if (q) qb.andWhere('m.title ILIKE :q', { q: `%${q}%` });
+    const [items, total] = await qb.orderBy('m.updatedAt', 'DESC').skip(skip).take(take).getManyAndCount();
+    return { total, page, pageSize: take, items };
   }
 
-  @Post('progress')
-  progress(@Body() dto: ProgressDto, @Req() req: any) {
-    return this.svc.setProgress(req.user.id, dto.mediaId, dto.position, dto.duration);
+  @Get('series')
+  async series(@Query('q') q?: string, @Query('page') page = 1, @Query('pageSize') pageSize = 48) {
+    const take = Math.min(200, Math.max(1, Number(pageSize)));
+    const skip = (Math.max(1, Number(page)) - 1) * take;
+    const qb = this.mediaRepo.createQueryBuilder('m').where('m.type = :t', { t: 'series' });
+    if (q) qb.andWhere('m.title ILIKE :q', { q: `%${q}%` });
+    const [items, total] = await qb.orderBy('m.updatedAt', 'DESC').skip(skip).take(take).getManyAndCount();
+    return { total, page, pageSize: take, items };
+  }
+
+  @Get('live')
+  async live(@Query('q') q?: string, @Query('page') page = 1, @Query('pageSize') pageSize = 60) {
+    const take = Math.min(200, Math.max(1, Number(pageSize)));
+    const skip = (Math.max(1, Number(page)) - 1) * take;
+    const qb = this.mediaRepo.createQueryBuilder('m').where('m.type = :t', { t: 'live' });
+    if (q) qb.andWhere('m.title ILIKE :q', { q: `%${q}%` });
+    const [items, total] = await qb.orderBy('m.updatedAt', 'DESC').skip(skip).take(take).getManyAndCount();
+    return { total, page, pageSize: take, items };
   }
 }
