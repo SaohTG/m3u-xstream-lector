@@ -20,15 +20,15 @@ services:
       TMDB_API_KEY: "d8175301037c00f3c719478998396539"
       API_PORT: "4000"
       NODE_ENV: development
-    ports:
-      - "4000:4000"
+    # (optionnel) tu peux commenter si tu ne veux plus exposer 4000 publiquement
+    # ports:
+    #   - "4000:4000"
 
   web:
     build:
       context: ./web
       args:
-        # ⚠️ Mets ici l'IP OU LE DOMAINE de TON SERVEUR (pas localhost)
-        VITE_API_URL: "http://85.31.239.110:4000"
+        VITE_API_URL: "/api"   # <— front appellera /api/*, Nginx proxy vers api:4000
     depends_on:
       - api
     ports:
