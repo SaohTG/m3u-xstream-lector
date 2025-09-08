@@ -1,23 +1,34 @@
-import { Entity, PrimaryGeneratedColumn, ManyToOne, UpdateDateColumn, Column, Index } from 'typeorm';
-import { User } from './user.entity';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  ManyToOne,
+  UpdateDateColumn,
+  Column,
+  Index,
+  CreateDateColumn,
+} from 'typeorm';
 
-@Entity()
+@Entity('progress')
+@Index(['userId', 'mediaId'], { unique: true })
 export class Progress {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @ManyToOne(() => User, u => u.progresses, { onDelete: 'CASCADE' })
-  user!: User;
+  // plus de ManyToOne(() => User, u => u.progresses)
+  @Column({ type: 'uuid' })
+  userId!: string;
 
-  @Index()
-  @Column()
-  mediaId!: string; // reference to MediaItem.externalId
-
-  @Column({ type: 'int', default: 0 })
-  position!: number; // seconds
+  @Column({ type: 'uuid' })
+  mediaId!: string;
 
   @Column({ type: 'int', default: 0 })
-  duration!: number; // seconds
+  position!: number; // secondes
+
+  @Column({ type: 'int', default: 0 })
+  duration!: number; // secondes
+
+  @CreateDateColumn()
+  createdAt!: Date;
 
   @UpdateDateColumn()
   updatedAt!: Date;
