@@ -10,8 +10,11 @@ async function bootstrap() {
   app.use(helmet());
   app.enableCors({ origin: [/^http:\/\/.*:5173$/, /.*/], credentials: true });
   app.use(cookieParser());
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true }));
-
+  app.useGlobalPipes(new ValidationPipe({
+    whitelist: true,
+    forbidNonWhitelisted: true,
+    transform: true
+  }));
   await app.listen(process.env.API_PORT || 3000);
 }
 bootstrap();
