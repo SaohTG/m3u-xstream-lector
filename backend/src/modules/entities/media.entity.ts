@@ -2,29 +2,38 @@ import {
   Column,
   CreateDateColumn,
   Entity,
-  ManyToOne,
+  Index,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
-  Index,
 } from 'typeorm';
-import { User } from './user.entity';
 
-export type SourceType = 'm3u' | 'xtream';
+export type MediaType = 'movie' | 'series' | 'live';
 
-@Entity('source')
-@Index(['user', 'type'])
-export class Source {
+@Entity('media')
+@Index(['type', 'title'])
+export class Media {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @ManyToOne(() => User, (u) => u.sources, { onDelete: 'CASCADE' })
-  user!: User;
+  @Column({ type: 'text' })
+  title!: string;
+
+  // UNIQUE pour permettre l'upsert par url
+  @Index({ unique: true })
+  @Column({ type: 'text', unique: true })
+  url!: string;
 
   @Column({ type: 'varchar', length: 16 })
-  type!: SourceType;           // 'm3u' | 'xtream'
+  type!: MediaType;
 
-  @Column({ type: 'text' })
-  url!: string;                // URL M3U ou base URL Xtream
+  @Column({ type: 'text', nullable: true })
+  groupTitle?: string;
+
+  @Column({ type: 'text', nullable: true })
+  posterUrl?: string;
+
+  @Column({ type: 'int', nullable: true })
+  tmdbId?: number;
 
   @CreateDateColumn()
   createdAt!: Date;
