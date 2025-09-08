@@ -1,7 +1,17 @@
+export const API_BASE =
+  (import.meta as any).env?.VITE_API_BASE ||
+  (typeof window !== 'undefined'
+    ? `http://${window.location.hostname}:3000`
+    : 'http://localhost:3000');
+
+export const getToken = () => localStorage.getItem('token');
+export const setToken = (t: string) => localStorage.setItem('token', t);
+export const clearToken = () => localStorage.removeItem('token');
+
 export async function api(path: string, opts: any = {}) {
   const { method = 'GET', headers = {}, body } = opts;
-  const token = localStorage.getItem('token');
-  const res = await fetch(`${(import.meta as any).env.VITE_API_BASE || ''}${path}`, {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}${path}`, {
     method,
     headers: {
       'Content-Type': 'application/json',
