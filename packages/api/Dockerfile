@@ -1,7 +1,7 @@
 FROM node:20-alpine
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci
+RUN npm install
 COPY . .
-RUN npm run build
-CMD ["node", "dist/main.js"]
+# on exécute l'API via ts-node (pas besoin de build nest)
+CMD ["npx","ts-node","src/main.ts"]
