@@ -1,79 +1,224 @@
 import React, { useState } from 'react';
-import { api } from '../lib/api';
 import { useNavigate } from 'react-router-dom';
+import { api } from '../lib/api';
 
 type LinkType = 'M3U' | 'XTREAM';
 
-export default function Onboarding(){
-  const [step, setStep] = useState(1);
-  const [type, setType] = useState<LinkType>('M3U');
-  const [m3uUrl, setM3uUrl] = useState('');
-  const [baseUrl, setBaseUrl] = useState('http://85.31.239.110:8888'); // xtream-mock
-  const [username, setUsername] = useState('u');
-  const [password, setPassword] = useState('p');
-  const [err, setErr] = useState('');
-  const [ok, setOk] = useState(false);
+const defaultXtreamBaseUrl =
+  typeof window !== 'undefined'
+    ? `http://${window.location.hostname}:8888`
+    : 'http://localhost:8888';
+
+export default function Onboarding() {
   const nav = useNavigate();
 
-  async function linkPlaylist(e: React.FormEvent){
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [type, setType] = useState<LinkType>('M3U');
+
+  // M3U
+  const [m3uUrl, setM3uUrl] = useState<string>('');
+
+  // Xtream
+  const [baseUrl, setBaseUrl] = useState<string>(defaultXtreamBaseUrl);
+  const [username, setUsername] = useState<string>('u');
+  const [password, setPassword] = useState<string>('p');
+
+  // UI state
+  const [submitting, setSubmitting] = useState<boolean>(false);
+  const [ok, setOk] = useState<boolean>(false);
+  const [err, setErr] = useState<string>('');
+
+  function nextStep() {
+    setStep((s) => (s === 3 ? 3 : ((s + 1) as 1 | 2 | 3)));
+  }
+  function prevStep() {
+    setStep((s) => (s === 1 ? 1 : ((s - 1) as 1 | 2 | 3)));
+  }
+
+  async function linkPlaylist(e: React.FormEvent) {
     e.preventDefault();
     setErr('');
+    setOk(false);
+    setSubmitting(true);
     try {
-      const body = type === 'M3U'
-        ? { type:'M3U', url: m3uUrl }
-        : { type:'XTREAM', baseUrl, username, password };
-      await api('/playlists/link', { method:'POST', body });
+      const body =
+        type === 'M3U'
+          ? { type: 'M3U', url: m3uUrl }
+          : { type: 'XTREAM', baseUrl, username, password };
+
+      const res = await api('/playlists/link', { method: 'POST', body });
+
+      // On n’autorise la redirection que si l’API confirme la validation
+      if (!res || res.validated !== true) {
+        throw new Error(
+          typeof res?.message === 'string'
+            ? res.message
+            : 'Validation échouée — vérifiez vos informations.'
+        );
+      }
+
       setOk(true);
-      setTimeout(()=>nav('/movies'), 800);
-    } catch (e:any) {
-      setErr(e.message || 'Erreur');
+      // petite pause UX puis redirection vers Films
+      setTimeout(() => nav('/movies'), 800);
+    } catch (e: any) {
+      setErr(e?.message || 'Erreur inconnue');
+    } finally {
+      setSubmitting(false);
     }
   }
 
   return (
-    <div style={{maxWidth:720,margin:'48px auto',display:'grid',gap:16}}>
-      <h1>Onboarding</h1>
+    <div style={{ maxWidth: 760, margin: '48px auto', padding: '0 16px', fontFamily: 'system-ui, sans-serif' }}>
+      <h1 style={{ marginBottom: 8 }}>Onboarding</h1>
+      <p style={{ opacity: 0.8, marginTop: 0 }}>
+        Configurez votre source IPTV avant d’accéder au contenu.
+      </p>
 
-      {step===1 && (
-        <div>
-          <h2>Étape 1 — Compte OK ✅</h2>
-          <p>Votre compte est prêt. Passons au choix de la source.</p>
-          <button onClick={()=>setStep(2)}>Continuer</button>
-        </div>
+      {/* Steps header */}
+      <div style={{ display: 'flex', gap: 8, margin: '16px 0' }}>
+        {([1, 2, 3] as const).map((s) => (
+          <div
+            key={s}
+            style={{
+              padding: '6px 10px',
+              borderRadius: 999,
+              border: '1px solid #333',
+              background: step === s ? '#111' : 'transparent',
+              color: step === s ? '#fff' : '#333',
+              fontSize: 13,
+            }}
+          >
+            Étape {s}
+          </div>
+        ))}
+      </div>
+
+      {step === 1 && (
+        <section style={{ display: 'grid', gap: 12 }}>
+          <h2>1 — Compte OK ✅</h2>
+          <p>
+            Votre compte est prêt. Nous allons maintenant lier votre playlist <strong>M3U</strong> ou votre compte <strong>Xtream</strong>.
+          </p>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={nextStep}>Continuer</button>
+          </div>
+        </section>
       )}
 
-      {step===2 && (
-        <div>
-          <h2>Étape 2 — Choisir M3U ou Xtream</h2>
-          <div style={{display:'flex',gap:12,margin:'12px 0'}}>
-            <button onClick={()=>{setType('M3U'); setStep(3);}}>M3U</button>
-            <button onClick={()=>{setType('XTREAM'); setStep(3);}}>Xtream</button>
+      {step === 2 && (
+        <section style={{ display: 'grid', gap: 12 }}>
+          <h2>2 — Choisissez votre type de source</h2>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={() => {
+                setType('M3U');
+                nextStep();
+              }}
+            >
+              M3U
+            </button>
+            <button
+              onClick={() => {
+                setType('XTREAM');
+                nextStep();
+              }}
+            >
+              Xtream Codes
+            </button>
           </div>
-          <button onClick={()=>setStep(1)}>Retour</button>
-        </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={prevStep}>Retour</button>
+          </div>
+        </section>
       )}
 
-      {step===3 && (
-        <form onSubmit={linkPlaylist} style={{display:'grid',gap:12}}>
-          <h2>Étape 3 — Lier la source ({type})</h2>
-          {type==='M3U' ? (
-            <>
-              <input placeholder="URL M3U" value={m3uUrl} onChange={e=>setM3uUrl(e.target.value)} required />
-            </>
-          ) : (
-            <>
-              <input placeholder="Base URL Xtream" value={baseUrl} onChange={e=>setBaseUrl(e.target.value)} required />
-              <input placeholder="Username" value={username} onChange={e=>setUsername(e.target.value)} required />
-              <input placeholder="Password" value={password} onChange={e=>setPassword(e.target.value)} required />
-            </>
-          )}
-          <div style={{display:'flex',gap:8}}>
-            <button type="button" onClick={()=>setStep(2)}>Retour</button>
-            <button type="submit">Lier et importer</button>
-          </div>
-          {err && <div style={{color:'tomato'}}>{err}</div>}
-          {ok && <div style={{color:'green'}}>Import démarré ! Redirection…</div>}
-        </form>
+      {step === 3 && (
+        <section>
+          <h2>3 — Lier la source ({type})</h2>
+
+          <form onSubmit={linkPlaylist} style={{ display: 'grid', gap: 12, marginTop: 12 }}>
+            {type === 'M3U' ? (
+              <>
+                <label style={{ display: 'grid', gap: 6 }}>
+                  <span>URL M3U</span>
+                  <input
+                    placeholder="https://exemple.com/liste.m3u"
+                    value={m3uUrl}
+                    onChange={(e) => setM3uUrl(e.target.value)}
+                    required
+                    pattern="https?://.+"
+                    style={{ padding: '10px 12px', border: '1px solid #333', borderRadius: 8 }}
+                  />
+                </label>
+              </>
+            ) : (
+              <>
+                <label style={{ display: 'grid', gap: 6 }}>
+                  <span>Base URL Xtream</span>
+                  <input
+                    placeholder="http://IP:PORT"
+                    value={baseUrl}
+                    onChange={(e) => setBaseUrl(e.target.value)}
+                    required
+                    pattern="https?://.+|http?://.+"
+                    style={{ padding: '10px 12px', border: '1px solid #333', borderRadius: 8 }}
+                  />
+                </label>
+                <div style={{ display: 'grid', gap: 12, gridTemplateColumns: '1fr 1fr' }}>
+                  <label style={{ display: 'grid', gap: 6 }}>
+                    <span>Username</span>
+                    <input
+                      placeholder="username"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      required
+                      style={{ padding: '10px 12px', border: '1px solid #333', borderRadius: 8 }}
+                    />
+                  </label>
+                  <label style={{ display: 'grid', gap: 6 }}>
+                    <span>Password</span>
+                    <input
+                      placeholder="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      required
+                      style={{ padding: '10px 12px', border: '1px solid #333', borderRadius: 8 }}
+                    />
+                  </label>
+                </div>
+              </>
+            )}
+
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <button type="button" onClick={prevStep} disabled={submitting}>
+                Retour
+              </button>
+              <button type="submit" disabled={submitting}>
+                {submitting ? 'Vérification…' : 'Tester & importer'}
+              </button>
+              {ok && <span style={{ color: 'green' }}>✅ Validé, redirection…</span>}
+            </div>
+
+            {err && (
+              <div
+                role="alert"
+                style={{
+                  color: '#b00020',
+                  background: '#2a0008',
+                  border: '1px solid #b00020',
+                  padding: '8px 12px',
+                  borderRadius: 8,
+                }}
+              >
+                {err}
+              </div>
+            )}
+
+            <p style={{ opacity: 0.7, fontSize: 13, marginTop: 6 }}>
+              L’app ne redirige que si la source est validée par l’API. En cas d’erreur, le message ci-dessus vous guide.
+            </p>
+          </form>
+        </section>
       )}
     </div>
   );
