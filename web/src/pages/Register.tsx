@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { register } from '../api';
+import { client } from '../api';
 
 export default function Register() {
   const [email, setEmail] = useState('');
@@ -8,11 +8,13 @@ export default function Register() {
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErr(null);
     try {
-      await register(email, password);
+      const { data } = await client.post('/auth/register', { email, password });
+      localStorage.setItem('token', data.access_token);
       location.replace('/');
     } catch (e: any) {
-      setErr(e.message || 'Inscription impossible');
+      setErr(e?.message || 'Inscription impossible');
     }
   };
 
