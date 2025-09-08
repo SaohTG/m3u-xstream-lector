@@ -1,13 +1,10 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { Favorite } from '../../entities/favorite.entity';
-import { Progress } from '../../entities/progress.entity';
 import { LibraryController } from './library.controller';
-import { LibraryService } from './library.service';
+import { Media } from '../entities/media.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Favorite, Progress])],
+  imports: [TypeOrmModule.forFeature([Media])],
   controllers: [LibraryController],
-  providers: [LibraryService]
 })
 export class LibraryModule {}
