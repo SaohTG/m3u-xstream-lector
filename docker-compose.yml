@@ -29,18 +29,16 @@ services:
     #   - "4000:4000"
 
   web:
-    build:
-      context: ./web
-      args:
-        # IMPORTANT : on fait pointer le front vers /api
-        VITE_API_URL: "/api"
-        # Change la valeur pour forcer un rebuild sans cache si besoin
-        BUILD_ID: "cache-bust-2"
-    depends_on: [api]
-    ports:
-      - "8080:80"
-    restart: unless-stopped
-    networks: [appnet]
+  build:
+    context: ./web
+    args:
+      VITE_API_URL: "/api"
+      BUILD_ID: "cache-bust-5"   # ← change ce nombre
+  depends_on: [api]
+  ports:
+    - "8080:80"
+  networks: [appnet]
+
 
 volumes:
   db_data:
