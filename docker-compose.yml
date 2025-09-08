@@ -40,7 +40,7 @@ services:
       context: ./web
       args:
         VITE_API_URL: "/api"     # le front appellera /api -> proxy nginx vers api
-        BUILD_ID: "13"            # change pour casser le cache
+        BUILD_ID: "14"            # change pour casser le cache
     ports:
       - "8080:80"
     depends_on:
