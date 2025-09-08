@@ -1,6 +1,5 @@
 import axios from 'axios'
 
-// Récupère la valeur injectée au build (peut être "/api" ou une URL absolue)
 const fromEnv = (import.meta as any)?.env?.VITE_API_URL as string | undefined
 const API = (fromEnv || '').trim()
 
@@ -9,9 +8,7 @@ function computeFallbackBaseURL() {
   return `${protocol}//${hostname}:4000`
 }
 
-// Si VITE_API_URL est défini (ex: "/api"), on l'utilise tel quel ; sinon fallback local
 const baseURL = API || computeFallbackBaseURL()
-
 export const client = axios.create({ baseURL })
 
 client.interceptors.request.use((config) => {
@@ -19,6 +16,7 @@ client.interceptors.request.use((config) => {
   if (token) config.headers.Authorization = `Bearer ${token}`
   return config
 })
+
 
 export async function login(email: string, password: string) {
   const { data } = await client.post('/auth/login', { email, password })
