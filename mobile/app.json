@@ -1,0 +1,8 @@
+{
+  "expo": {
+    "name": "IPTV One",
+    "slug": "iptv-one",
+    "scheme": "iptvone",
+    "sdkVersion": "51.0.0"
+  }
+}
