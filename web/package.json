@@ -1,27 +1,18 @@
 {
-  "name": "iptv-web",
-  "version": "0.1.0",
-  "private": true,
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview --port 5173"
-  },
-  "dependencies": {
-    "axios": "^1.6.8",
-    "hls.js": "^1.5.12",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "react-router-dom": "^6.22.3"
+    "build": "vite build",     // <= pas de 'tsc -b' ici
+    "preview": "vite preview"
   },
   "devDependencies": {
-    "@types/react": "^18.2.64",
-    "@types/react-dom": "^18.2.21",
-    "@vitejs/plugin-react": "^4.3.2",
-    "autoprefixer": "^10.4.19",
-    "postcss": "^8.4.35",
-    "tailwindcss": "^3.4.3",
-    "typescript": "^5.4.2",
-    "vite": "^5.1.5"
+    "vite": "^5.0.0",
+    "@vitejs/plugin-react": "^4.0.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.22.0",
+    "axios": "^1.6.0"
   }
 }
