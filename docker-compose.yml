@@ -1,3 +1,5 @@
+version: "3.8"
+
 services:
   db:
     image: postgres:15
@@ -8,37 +10,41 @@ services:
     volumes:
       - db_data:/var/lib/postgresql/data
     restart: unless-stopped
-    networks: [appnet]
-    # (optionnel) exposer la DB en dehors du host :
-    # ports:
-    #   - "5432:5432"
+    networks:
+      - appnet
 
   api:
     build: ./backend
-    depends_on: [db]
     environment:
       DATABASE_URL: postgres://iptv:iptv@db:5432/iptvapp
       JWT_SECRET: supersecret_change_me
       TMDB_API_KEY: "d8175301037c00f3c719478998396539"
       API_PORT: "4000"
       NODE_ENV: development
+    depends_on:
+      db:
+        condition: service_started
     restart: unless-stopped
-    networks: [appnet]
+    networks:
+      - appnet
     # (déconseillé) exposer publiquement l'API :
     # ports:
     #   - "4000:4000"
 
   web:
-  build:
-    context: ./web
-    args:
-      VITE_API_URL: "/api"
-      BUILD_ID: "cache-bust-5"   # ← change ce nombre
-  depends_on: [api]
-  ports:
-    - "8080:80"
-  networks: [appnet]
-
+    build:
+      context: ./web
+      args:
+        VITE_API_URL: "/api"         # front appelle /api/*
+        BUILD_ID: "cache-bust-6"     # change pour forcer le rebuild
+    depends_on:
+      api:
+        condition: service_started
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+    networks:
+      - appnet
 
 volumes:
   db_data:
