@@ -7,27 +7,23 @@ export class PlaylistsService {
   async link(dto: LinkPlaylistDto) {
     if (dto.type === 'M3U') {
       if (!dto.url) throw new BadRequestException('URL M3U manquante');
-      // Fetch & valider le header #EXTM3U
       try {
+        // GET et vérifie le header #EXTM3U tout au début
         const res = await axios.get<string>(dto.url, {
           timeout: 5000,
           responseType: 'text',
-          // Limiter la taille si le serveur envoie un gros fichier
-          maxContentLength: 1024 * 1024 * 2, // 2MB
+          maxContentLength: 2 * 1024 * 1024,
           validateStatus: s => s >= 200 && s < 400,
         });
-        const text = (res.data || '').slice(0, 2048); // on regarde le début
-        if (!text.includes('#EXTM3U')) {
-          throw new BadRequestException('Fichier M3U invalide (header #EXTM3U absent)');
+        const head = (res.data || '').slice(0, 128).trim();
+        if (!head.startsWith('#EXTM3U')) {
+          throw new BadRequestException('Fichier M3U invalide (header #EXTM3U attendu)');
         }
       } catch (e: any) {
-        if (e?.response) {
-          throw new BadRequestException(`M3U inaccessible (HTTP ${e.response.status})`);
-        }
-        if (e?.code === 'ECONNABORTED') {
-          throw new BadRequestException('M3U timeout (5s)');
-        }
-        throw new BadRequestException(e?.message || 'Erreur M3U');
+        if (e?.response) throw new BadRequestException(`M3U inaccessible (HTTP ${e.response.status})`);
+        if (e?.code === 'ECONNABORTED') throw new BadRequestException('M3U timeout (5s)');
+        if (e instanceof BadRequestException) throw e;
+        throw new BadRequestException('Erreur M3U');
       }
     }
 
@@ -42,23 +38,17 @@ export class PlaylistsService {
         const data = res.data || {};
         const auth = Number(data?.user_info?.auth) === 1;
         const active = String(data?.user_info?.status || '').toLowerCase() === 'active';
-        if (!auth && !active) {
-          throw new UnauthorizedException('Identifiants Xtream invalides ou inactifs');
-        }
+        if (!auth || !active) throw new UnauthorizedException('Identifiants Xtream invalides ou inactifs');
       } catch (e: any) {
-        if (e?.response) {
-          throw new UnauthorizedException(`Xtream rejeté (HTTP ${e.response.status})`);
-        }
-        if (e?.code === 'ECONNABORTED') {
-          throw new BadRequestException('Xtream timeout (5s)');
-        }
+        if (e?.response) throw new UnauthorizedException(`Xtream rejeté (HTTP ${e.response.status})`);
+        if (e?.code === 'ECONNABORTED') throw new BadRequestException('Xtream timeout (5s)');
         if (e instanceof UnauthorizedException) throw e;
-        throw new BadRequestException(e?.message || 'Erreur Xtream');
+        throw new BadRequestException('Erreur Xtream');
       }
     }
 
-    // Si validation OK, on retourne un job d’import “mocké” (à remplacer par un vrai job)
-    const id = 'pl_' + Math.random().toString(36).slice(2, 8);
-    return { playlistId: id, status: 'PENDING' };
+    // Si on arrive ici, la validation est OK
+    const playlistId = 'pl_' + Math.random().toString(36).slice(2, 8);
+    return { validated: true, playlistId, status: 'PENDING' };
   }
 }
