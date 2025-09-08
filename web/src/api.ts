@@ -2,14 +2,13 @@ import axios from 'axios'
 
 const fromEnv = (import.meta as any)?.env?.VITE_API_URL as string | undefined
 const API = (fromEnv || '').trim()
-
 function computeFallbackBaseURL() {
   const { protocol, hostname } = window.location
   return `${protocol}//${hostname}:4000`
 }
-
 const baseURL = API || computeFallbackBaseURL()
 export const client = axios.create({ baseURL })
+
 
 client.interceptors.request.use((config) => {
   const token = localStorage.getItem('token')
