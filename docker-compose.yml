@@ -3,25 +3,29 @@ version: "3.9"
 services:
   db:
     image: postgres:15
+    container_name: iptv-saas-db
     environment:
       POSTGRES_USER: iptv
       POSTGRES_PASSWORD: iptv
       POSTGRES_DB: iptvapp
-    ports:
-      - "5432:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
+    # Si tu veux rendre Postgres accessible depuis l'hôte, décommente la ligne ci-dessous
+    # ports:
+    #   - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U iptv -d iptvapp"]
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   api:
+    container_name: iptv-saas-api
     build:
       context: ./backend
       args:
-        API_BUILD_ID: "9"        # change ce nombre pour forcer un rebuild
+        API_BUILD_ID: "18"            # ↩ augmente ce nombre pour forcer un rebuild (cache bust)
     environment:
       DATABASE_URL: postgres://iptv:iptv@db:5432/iptvapp
       JWT_SECRET: supersecret_change_me
@@ -36,18 +40,22 @@ services:
     restart: unless-stopped
 
   web:
-  build:
-    context: ./web
-    args:
-      VITE_API_URL: "/api"
-      BUILD_ID: "17"   # ⬅️ change ce nombre pour casser le cache
-  ports:
-    - "8080:80"
-  depends_on:
-    api:
-      condition: service_started
-  restart: unless-stopped
-
+    container_name: iptv-saas-web
+    build:
+      context: ./web
+      args:
+        VITE_API_URL: "/api"          # le front appelle /api → nginx proxy vers api:4000
+        BUILD_ID: "18"                # ↩ augmente pour forcer un rebuild (cache bust)
+    depends_on:
+      api:
+        condition: service_started
+    ports:
+      - "8080:80"
+    restart: unless-stopped
 
 volumes:
   db_data:
+
+networks:
+  default:
+    name: iptv-saas-net
