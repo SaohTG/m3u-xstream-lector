@@ -1,31 +1,27 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, OneToMany } from 'typeorm';
-import { PlaylistSource } from './playlist-source.entity';
-import { Favorite } from './favorite.entity';
-import { Progress } from './progress.entity';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  Index,
+  PrimaryGeneratedColumn,
+  UpdateDateColumn,
+} from 'typeorm';
 
-@Entity()
+@Entity('user')
+@Index(['email'], { unique: true })
 export class User {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column({ unique: true })
+  @Column({ type: 'text' })
   email!: string;
 
-  @Column()
+  @Column({ type: 'text' })
   passwordHash!: string;
-
-  @Column({ nullable: true })
-  displayName?: string;
 
   @CreateDateColumn()
   createdAt!: Date;
 
-  @OneToMany(() => PlaylistSource, p => p.user)
-  sources!: PlaylistSource[];
-
-  @OneToMany(() => Favorite, f => f.user)
-  favorites!: Favorite[];
-
-  @OneToMany(() => Progress, p => p.user)
-  progresses!: Progress[];
+  @UpdateDateColumn()
+  updatedAt!: Date;
 }
