@@ -1,4 +1,4 @@
-version: "3.8"
+version: "3.9"
 
 services:
   db:
@@ -7,48 +7,46 @@ services:
       POSTGRES_USER: iptv
       POSTGRES_PASSWORD: iptv
       POSTGRES_DB: iptvapp
+    ports:
+      - "5432:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
-    restart: unless-stopped
-    networks:
-      - appnet
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U iptv -d iptvapp"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   api:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        API_BUILD_ID: "9"        # change ce nombre pour forcer un rebuild
     environment:
       DATABASE_URL: postgres://iptv:iptv@db:5432/iptvapp
       JWT_SECRET: supersecret_change_me
       TMDB_API_KEY: "d8175301037c00f3c719478998396539"
       API_PORT: "4000"
-      NODE_ENV: development
+      NODE_ENV: production
     depends_on:
       db:
-        condition: service_started
+        condition: service_healthy
+    ports:
+      - "4000:4000"
     restart: unless-stopped
-    networks:
-      - appnet
-    # (déconseillé) exposer publiquement l'API :
-    # ports:
-    #   - "4000:4000"
 
   web:
-  build:
-    context: ./web
-    args:
-      VITE_API_URL: "/api"
-      BUILD_ID: "cache-bust-8"   # ⬅️ incrémente ce nombre
+    build:
+      context: ./web
+      args:
+        VITE_API_URL: "/api"     # le front appellera /api -> proxy nginx vers api
+        BUILD_ID: "9"            # change pour casser le cache
+    ports:
+      - "8080:80"
     depends_on:
       api:
         condition: service_started
-    ports:
-      - "8080:80"
     restart: unless-stopped
-    networks:
-      - appnet
 
 volumes:
   db_data:
-
-networks:
-  appnet:
-    driver: bridge
