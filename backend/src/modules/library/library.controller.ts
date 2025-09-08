@@ -1,8 +1,10 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Media } from '../entities/media.entity';
+import { JwtGuard } from '../auth/jwt.guard'; // ⬅️ ajoute cette ligne
 
+@UseGuards(JwtGuard) // ⬅️ et ce décorateur
 @Controller('library')
 export class LibraryController {
   constructor(@InjectRepository(Media) private readonly mediaRepo: Repository<Media>) {}
