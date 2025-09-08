@@ -47,7 +47,8 @@ services:
     depends_on: [api]
     ports: ["5173:5173"]
     environment:
-      VITE_API_BASE: "http://localhost:3000"
+      VITE_API_BASE: "http://85.31.239.110:3000"   # <- remplace localhost
+
 
 volumes:
   pg:
