@@ -1,31 +1,33 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, CreateDateColumn } from 'typeorm';
-import { User } from './user.entity';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  Index,
+  UpdateDateColumn,
+} from 'typeorm';
 
-export type SourceType = 'M3U' | 'XTREAM';
+export type SourceType = 'm3u' | 'xtream';
 
-@Entity()
+@Entity('playlist_source')
+@Index(['userId', 'type'])
 export class PlaylistSource {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @ManyToOne(() => User, u => u.sources, { onDelete: 'CASCADE' })
-  user!: User;
+  // plus de ManyToOne(() => User, u => u.sources)
+  @Column({ type: 'uuid' })
+  userId!: string;
 
-  @Column()
-  type!: SourceType;
+  @Column({ type: 'varchar', length: 16 })
+  type!: SourceType; // 'm3u' | 'xtream'
 
-  @Column({ nullable: true })
-  url?: string; // M3U URL
-
-  @Column({ nullable: true })
-  baseUrl?: string; // Xtream base URL
-
-  @Column({ nullable: true })
-  username?: string;
-
-  @Column({ nullable: true })
-  password?: string;
+  @Column({ type: 'text' })
+  url!: string;
 
   @CreateDateColumn()
   createdAt!: Date;
+
+  @UpdateDateColumn()
+  updatedAt!: Date;
 }
