@@ -1,20 +1,20 @@
 import axios from 'axios'
 
+// On lit la valeur build-time si elle existe (ex: "/api")
 const fromEnv = (import.meta as any)?.env?.VITE_API_URL as string | undefined
 const API = (fromEnv || '').trim()
-function computeFallbackBaseURL() {
-  const { protocol, hostname } = window.location
-  return `${protocol}//${hostname}:4000`
-}
-const baseURL = API || computeFallbackBaseURL()
-export const client = axios.create({ baseURL })
 
+// ❗ Fallback forcé sur "/api" (et non plus hostname:4000)
+const baseURL = API || '/api'
+
+export const client = axios.create({ baseURL })
 
 client.interceptors.request.use((config) => {
   const token = localStorage.getItem('token')
   if (token) config.headers.Authorization = `Bearer ${token}`
   return config
 })
+
 
 
 export async function login(email: string, password: string) {
