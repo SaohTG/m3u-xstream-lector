@@ -1,26 +1,30 @@
-import { Outlet, Link, useNavigate } from 'react-router-dom'
-import './styles.css'
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import PrivateRoute from './components/PrivateRoute';
+import Home from './pages/Home';
+import Movies from './pages/Movies';
+import Series from './pages/Series';
+import Login from './pages/Login';
+import Register from './pages/Register';
 
 export default function App() {
-  const navigate = useNavigate();
-  const logout = () => { localStorage.removeItem('token'); navigate('/login'); }
   return (
-    <div>
-      <header className="header px-4 py-3 flex gap-6 items-center">
-        <Link to="/" className="font-bold text-xl">IPTV One</Link>
-        <nav className="flex gap-4 text-sm">
-          <Link to="/movies">Films</Link>
-          <Link to="/series">Séries</Link>
-          <Link to="/live">TV en direct</Link>
-          <Link to="/my-list">Ma liste</Link>
-        </nav>
-        <div className="ml-auto">
-          <button className="btn" onClick={logout}>Déconnexion</button>
-        </div>
-      </header>
-      <main className="p-4">
-        <Outlet/>
-      </main>
-    </div>
-  )
+    <BrowserRouter>
+      <Routes>
+        {/* Routes publiques */}
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
+
+        {/* Routes protégées */}
+        <Route element={<PrivateRoute />}>
+          <Route path="/" element={<Home />} />
+          <Route path="/movies" element={<Movies />} />
+          <Route path="/series" element={<Series />} />
+          {/* ajoute ici toutes tes autres pages */}
+        </Route>
+
+        {/* fallback */}
+        <Route path="*" element={<Login />} />
+      </Routes>
+    </BrowserRouter>
+  );
 }
