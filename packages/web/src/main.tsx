@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { Component, ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom';
 import App from './routes/App';
@@ -9,6 +9,20 @@ import Shows from './routes/Shows';
 import Live from './routes/Live';
 import MyList from './routes/MyList';
 import { getToken } from './lib/api';
+
+class ErrorBoundary extends Component<{children:ReactNode}, {err?:any}> {
+  constructor(props:any){ super(props); this.state = {}; }
+  static getDerivedStateFromError(err:any){ return { err }; }
+  componentDidCatch(err:any){ console.error('UI error:', err); }
+  render(){
+    if(this.state.err){
+      return <pre style={{whiteSpace:'pre-wrap', padding:16, color:'#b00', background:'#200'}}>
+        Une erreur est survenue côté UI : {String(this.state.err?.message||this.state.err)}
+      </pre>;
+    }
+    return this.props.children;
+  }
+}
 
 const Protected = ({ children }: { children: JSX.Element }) =>
   getToken() ? children : <Navigate to="/auth" replace />;
@@ -29,4 +43,5 @@ const router = createBrowserRouter([
   },
 ]);
 
-createRoot(document.getElementById('root')!).render(<RouterProvider router={router} />);
+createRoot(document.getElementById('root')!)
+  .render(<ErrorBoundary><RouterProvider router={router} /></ErrorBoundary>);
