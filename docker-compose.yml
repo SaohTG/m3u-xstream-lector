@@ -35,7 +35,7 @@ services:
         # IMPORTANT : on fait pointer le front vers /api
         VITE_API_URL: "/api"
         # Change la valeur pour forcer un rebuild sans cache si besoin
-        BUILD_ID: "cache-bust-1"
+        BUILD_ID: "cache-bust-2"
     depends_on: [api]
     ports:
       - "8080:80"
