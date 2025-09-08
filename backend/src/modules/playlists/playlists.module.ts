@@ -1,14 +1,16 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { PlaylistSource } from '../../entities/playlist-source.entity';
-import { MediaItem } from '../../entities/media-item.entity';
 import { PlaylistsController } from './playlists.controller';
 import { PlaylistsService } from './playlists.service';
-import { TmdbModule } from '../tmdb/tmdb.module';
+import { Media } from '../entities/media.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([PlaylistSource, MediaItem]), TmdbModule],
+  imports: [
+    // ➜ rend Repository<Media> injectable dans ce module
+    TypeOrmModule.forFeature([Media]),
+  ],
   controllers: [PlaylistsController],
-  providers: [PlaylistsService]
+  providers: [PlaylistsService],
+  exports: [PlaylistsService],
 })
 export class PlaylistsModule {}
