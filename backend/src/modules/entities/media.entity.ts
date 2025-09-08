@@ -11,7 +11,9 @@ export class Media {
   @Column({ type: 'text' })
   title!: string;
 
-  @Column({ type: 'text' })
+  // ⬇️ unique pour permettre l'upsert sur 'url'
+  @Index({ unique: true })
+  @Column({ type: 'text', unique: true })
   url!: string;
 
   @Column({ type: 'varchar', length: 16 })
