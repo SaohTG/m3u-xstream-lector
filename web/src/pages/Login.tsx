@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { login } from '../api';
+import { client } from '../api';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -8,11 +8,13 @@ export default function Login() {
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErr(null);
     try {
-      await login(email, password);
+      const { data } = await client.post('/auth/login', { email, password });
+      localStorage.setItem('token', data.access_token);
       location.replace('/');
     } catch (e: any) {
-      setErr(e.message || 'Connexion impossible');
+      setErr(e?.message || 'Connexion impossible');
     }
   };
 
