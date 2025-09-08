@@ -36,10 +36,13 @@ export async function register(email: string, password: string, displayName?: st
   return data;
 }
 
-export async function parseM3U(url: string) {
-  const { data } = await client.post('/playlists/parse-m3u', { url });
+// ... imports + client + interceptors identiques
+
+export async function parseM3U(url: string, signal?: AbortSignal) {
+  const { data } = await client.post('/playlists/parse-m3u', { url }, { signal });
   return data.items as any[];
 }
+
 
 export async function xtreamConnect(baseUrl: string, username: string, password: string) {
   const { data } = await client.post('/playlists/xtream/connect', { baseUrl, username, password });
