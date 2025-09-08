@@ -32,11 +32,11 @@ services:
     #   - "4000:4000"
 
   web:
-    build:
-      context: ./web
-      args:
-        VITE_API_URL: "/api"         # front appelle /api/*
-        BUILD_ID: "cache-bust-6"     # change pour forcer le rebuild
+  build:
+    context: ./web
+    args:
+      VITE_API_URL: "/api"
+      BUILD_ID: "cache-bust-8"   # ⬅️ incrémente ce nombre
     depends_on:
       api:
         condition: service_started
