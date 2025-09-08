@@ -58,3 +58,19 @@ export async function setProgress(mediaId: string, position: number, duration: n
   const { data } = await client.post('/library/progress', { mediaId, position, duration });
   return data;
 }
+
+export async function listMovies(params?: { q?: string; page?: number; pageSize?: number }) {
+  const { data } = await client.get('/library/movies', { params });
+  return data as { total: number; page: number; pageSize: number; items: any[] };
+}
+
+export async function listSeries(params?: { q?: string; page?: number; pageSize?: number }) {
+  const { data } = await client.get('/library/series', { params });
+  return data;
+}
+
+export async function listLive(params?: { q?: string; page?: number; pageSize?: number }) {
+  const { data } = await client.get('/library/live', { params });
+  return data;
+}
+
