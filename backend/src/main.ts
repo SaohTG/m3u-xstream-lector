@@ -7,7 +7,8 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule, { cors: true });
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   const port = process.env.API_PORT ? Number(process.env.API_PORT) : 4000;
-  await app.listen(port);
+  // ✅ force l’écoute sur 0.0.0.0 (pas seulement localhost)
+  await app.listen(port, '0.0.0.0');
   console.log(`API running on http://localhost:${port}`);
 }
 bootstrap();
