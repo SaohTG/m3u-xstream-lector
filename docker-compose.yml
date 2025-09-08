@@ -45,7 +45,7 @@ services:
       context: ./web
       args:
         VITE_API_URL: "/api"          # le front appelle /api → nginx proxy vers api:4000
-        BUILD_ID: "18"                # ↩ augmente pour forcer un rebuild (cache bust)
+        BUILD_ID: "19"                # ↩ augmente pour forcer un rebuild (cache bust)
     depends_on:
       api:
         condition: service_started
