@@ -7,8 +7,8 @@ services:
       POSTGRES_DB: iptvapp
     volumes:
       - db_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+    networks:
+      - appnet
 
   api:
     build: ./backend
@@ -20,19 +20,27 @@ services:
       TMDB_API_KEY: "d8175301037c00f3c719478998396539"
       API_PORT: "4000"
       NODE_ENV: development
-    # (optionnel) tu peux commenter si tu ne veux plus exposer 4000 publiquement
+    # on n'expose plus le port 4000 publiquement, on passe par le proxy nginx
     # ports:
     #   - "4000:4000"
+    networks:
+      - appnet
 
   web:
     build:
       context: ./web
       args:
-        VITE_API_URL: "/api"   # <— front appellera /api/*, Nginx proxy vers api:4000
+        VITE_API_URL: "/api"   # IMPORTANT : chaîne => routes front -> /api/*
     depends_on:
       - api
     ports:
       - "8080:80"
+    networks:
+      - appnet
 
 volumes:
   db_data:
+
+networks:
+  appnet:
+    driver: bridge
