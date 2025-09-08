@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-// Valeur injectée au build par Vite (peut être "/api" ou une URL absolue)
+// Récupère la valeur injectée au build (peut être "/api" ou une URL absolue)
 const fromEnv = (import.meta as any)?.env?.VITE_API_URL as string | undefined
 const API = (fromEnv || '').trim()
 
@@ -9,8 +9,7 @@ function computeFallbackBaseURL() {
   return `${protocol}//${hostname}:4000`
 }
 
-// Si API est défini (ex: "/api" ou "http://..."), on l'utilise tel quel.
-// Sinon, fallback sur même host:4000 (utile en dev).
+// Si VITE_API_URL est défini (ex: "/api"), on l'utilise tel quel ; sinon fallback local
 const baseURL = API || computeFallbackBaseURL()
 
 export const client = axios.create({ baseURL })
