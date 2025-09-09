@@ -12,8 +12,8 @@ export class LiveController {
     return this.svc.channels(req.user.userId);
   }
 
-  @Get('rails')
-  rails(@Req() req: any) {
-    return this.svc.rails(req.user.userId);
+  @Get('channels/sections')
+  channelSections(@Req() req: any) {
+    return this.svc.channelSections(req.user.userId);
   }
 }
