@@ -2,15 +2,22 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { PlaylistsService } from '../playlists/playlists.service';
 import axios from 'axios';
 import { classifyM3U, parseM3U } from '../../utils/m3u';
-import { Playlist } from '../playlists/playlist.entity';
 
 const log = new Logger('LiveService');
+
+type ActivePlaylist = {
+  type: 'M3U' | 'XTREAM';
+  url?: string | null;
+  base_url?: string | null;
+  username?: string | null;
+  password?: string | null;
+};
 
 @Injectable()
 export class LiveService {
   constructor(private playlists: PlaylistsService) {}
 
-  private assertPlaylist(pl: Playlist | null): asserts pl is Playlist {
+  private assertPlaylist(pl: ActivePlaylist | null): asserts pl is ActivePlaylist {
     if (!pl) throw new BadRequestException('Aucune source liée.');
   }
 
@@ -35,7 +42,6 @@ export class LiveService {
       if (!pl.base_url || !pl.username || !pl.password) {
         throw new BadRequestException('Playlist Xtream incomplète (base_url/username/password).');
       }
-
       let arr: any[] = [];
       try {
         const data = await this.xtreamGet(pl.base_url, {
@@ -45,7 +51,6 @@ export class LiveService {
       } catch (e) {
         log.warn(`get_live_streams direct a échoué: ${String((e as any)?.message || e)}`);
       }
-
       if (arr.length === 0) {
         try {
           const cats = await this.xtreamGet(pl.base_url, {
@@ -66,7 +71,6 @@ export class LiveService {
           log.warn(`fallback catégories live a échoué: ${String((e as any)?.message || e)}`);
         }
       }
-
       return (arr || []).slice(0, 1200).map((x: any) => ({
         id: x.stream_id ?? x.id,
         name: x.name,
