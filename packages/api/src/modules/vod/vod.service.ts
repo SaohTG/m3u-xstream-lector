@@ -102,12 +102,11 @@ export class VodService {
       .map(([title, arr]) => ({ key: `grp:${title}`, title, items: arr.slice(0, 24) as T[] }));
   }
 
-  // ----- Enrichissement VOD (Xtream: get_vod_info) -----
+  // ----- Enrichissement VOD -----
   private async getVodInfo(base: string, username: string, password: string, vodId: string | number) {
     const data = await this.xtreamGet(base, {
       username, password, action: 'get_vod_info', vod_id: vodId,
     });
-    // Les panels varient: info, movie_data, movie_info...
     const info = data?.info || data?.movie_data || data?.movie_info || {};
     return {
       poster: info.movie_image || info.cover || info.backdrop_path || null,
@@ -119,6 +118,8 @@ export class VodService {
         (info.year && Number(info.year)) ||
         null,
       title: info.name || info.title || null,
+      backdrop: info.backdrop_path || null,
+      container: info.container_extension || info.container || null,
     };
   }
 
@@ -130,10 +131,7 @@ export class VodService {
     maxItems = 120,
     concurrency = 8,
   ): Promise<Record<string | number, Partial<Movie>>> {
-    const ids = Array.from(
-      new Set(items.map(m => m.id).filter(Boolean))
-    ).slice(0, maxItems);
-
+    const ids = Array.from(new Set(items.map(m => m.id).filter(Boolean))).slice(0, maxItems);
     const results: Record<string | number, Partial<Movie>> = {};
     let idx = 0;
 
@@ -151,15 +149,45 @@ export class VodService {
             year: inf.year ?? undefined,
             title: inf.title ?? undefined,
           };
-        } catch (e) {
-          // on continue
+        } catch {
+          // ignore
         }
       }
     };
-
     const workers = Array.from({ length: Math.min(concurrency, ids.length) }, () => worker());
     await Promise.all(workers);
     return results;
+  }
+
+  // ----- TMDB helpers -----
+  private async tmdbFindByTitle(title: string, year?: number | null) {
+    const apiKey = process.env.TMDB_API_KEY;
+    if (!apiKey) return null;
+    try {
+      const search = await axios.get('https://api.themoviedb.org/3/search/movie', {
+        params: { api_key: apiKey, query: title, year: year || undefined, include_adult: false, language: 'fr-FR' },
+        timeout: 8000,
+      });
+      const res = Array.isArray(search.data?.results) ? search.data.results : [];
+      if (!res.length) return null;
+      const best = res[0];
+      const details = await axios.get(`https://api.themoviedb.org/3/movie/${best.id}`, {
+        params: { api_key: apiKey, language: 'fr-FR' },
+        timeout: 8000,
+      });
+      const d = details.data || {};
+      return {
+        tmdb_id: best.id,
+        title: d.title || best.title || null,
+        year: d.release_date ? Number(String(d.release_date).slice(0, 4)) : (best.release_date ? Number(String(best.release_date).slice(0, 4)) : null),
+        plot: d.overview || best.overview || null,
+        rating: d.vote_average ?? best.vote_average ?? null,
+        poster: d.poster_path ? `https://image.tmdb.org/t/p/w500${d.poster_path}` : (best.poster_path ? `https://image.tmdb.org/t/p/w500${best.poster_path}` : null),
+        backdrop: d.backdrop_path ? `https://image.tmdb.org/t/p/original${d.backdrop_path}` : (best.backdrop_path ? `https://image.tmdb.org/t/p/original${best.backdrop_path}` : null),
+      };
+    } catch {
+      return null;
+    }
   }
 
   // ---------- Public lists ----------
@@ -305,14 +333,11 @@ export class VodService {
 
     const out: Section<Movie>[] = [];
 
-    // Sections de base
     if (pl.type === 'XTREAM') {
-      // Récemment ajoutés
       const recent = movies.filter(m => typeof m.added === 'number')
         .sort((a, b) => (b.added! - a.added!)).slice(0, 30);
       if (recent.length) out.push({ key: 'recent', title: 'Récemment ajoutés', items: recent });
 
-      // Catégories
       let catsMap: Record<string, string> = {};
       try {
         const cats = await this.xtreamGet(pl.base_url!, { username: pl.username!, password: pl.password!, action: 'get_vod_categories' });
@@ -324,25 +349,20 @@ export class VodService {
       } catch {}
       out.push(...this.byGroup(movies, catsMap, 8));
     } else {
-      // M3U
       if (movies.length) out.push({ key: 'recent', title: 'Récemment ajoutés', items: movies.slice(0, 30) });
       out.push(...this.byGroup(movies, undefined, 8));
     }
 
-    // Années
     const years = this.topYears(movies, 3);
     for (const y of years) {
       const arr = movies.filter(m => (m.year ?? this.yearFromTitle(m.title)) === y).slice(0, 24);
       if (arr.length) out.push({ key: `year:${y}`, title: `Films ${y}`, items: arr });
     }
 
-    // ----- ENRICHISSEMENT ciblé pour Xtream (get_vod_info) -----
+    // Enrichissement ciblé Xtream
     if (pl.type === 'XTREAM' && pl.base_url && pl.username && pl.password) {
-      // On enrichit uniquement les films présents dans les rails (limite globale 120)
       const allItems = out.flatMap(s => s.items);
       const details = await this.enrichMoviesXtream(pl.base_url, pl.username, pl.password, allItems, 120, 8);
-
-      // Patch des items
       for (const sec of out) {
         sec.items = sec.items.map(m => {
           const d = details[m.id];
@@ -370,17 +390,14 @@ export class VodService {
 
     const out: Section<Show>[] = [];
 
-    // Récents
     const recent = shows
       .filter(s => typeof s.added === 'number')
       .sort((a, b) => (b.added! - a.added!))
       .slice(0, 30);
     if (recent.length) out.push({ key: 'recent', title: 'Récemment ajoutées', items: recent });
 
-    // Mapping catégories Xtream
     let catsMap: Record<string, string> = {};
-    const mapXtream =
-      pl.type === 'XTREAM' && pl.base_url && pl.username && pl.password;
+    const mapXtream = pl.type === 'XTREAM' && pl.base_url && pl.username && pl.password;
     if (mapXtream) {
       try {
         const cats = await this.xtreamGet(pl.base_url!, {
@@ -397,11 +414,10 @@ export class VodService {
       } catch {}
     }
 
-    // Regroupement robuste
     const buckets = new Map<string, Show[]>();
     const deriveFromTitle = (t?: string | null): string | null => {
       if (!t) return null;
-      const mBracket = t.match(/^\s*\[([^\]]+)\]/); // [Drama] Title
+      const mBracket = t.match(/^\s*\[([^\]]+)\]/);
       if (mBracket) return mBracket[1].trim();
       const parts = t.split(/[-|•–—]/);
       if (parts.length >= 2 && parts[0].trim().length >= 3) return parts[0].trim().slice(0, 40);
@@ -430,5 +446,99 @@ export class VodService {
     }
 
     return out;
+  }
+
+  // ---------- DÉTAIL FILM (avec TMDB + URL lecture) ----------
+  async movieDetail(userId: string, idParam: string) {
+    const pl = await this.playlists.getActiveForUser(userId);
+    this.assertPlaylist(pl);
+
+    if (pl.type === 'XTREAM') {
+      if (!pl.base_url || !pl.username || !pl.password)
+        throw new BadRequestException('Playlist Xtream incomplète.');
+
+      const id = /^\d+$/.test(String(idParam)) ? Number(idParam) : idParam;
+
+      // Info Xtream
+      let info: any = {};
+      try {
+        info = await this.getVodInfo(pl.base_url, pl.username, pl.password, id);
+      } catch {}
+
+      // Stream URL
+      const ext = info.container || 'mp4';
+      const base = pl.base_url.replace(/\/+$/, '');
+      const stream_url = `${base}/movie/${encodeURIComponent(pl.username!)}/${encodeURIComponent(pl.password!)}/${id}.${ext}`;
+
+      // Champs de base
+      let detail: any = {
+        id,
+        title: info.title || null,
+        year: info.year || null,
+        plot: info.plot || null,
+        rating: info.rating || null,
+        poster: info.poster || null,
+        backdrop: info.backdrop || null,
+        stream_url,
+        source: 'XTREAM',
+      };
+
+      // TMDB enrich
+      const tmdb = await this.tmdbFindByTitle(detail.title || '', detail.year || undefined);
+      if (tmdb) {
+        detail = {
+          ...detail,
+          title: tmdb.title || detail.title,
+          year: tmdb.year ?? detail.year,
+          plot: tmdb.plot || detail.plot,
+          rating: tmdb.rating ?? detail.rating,
+          poster: tmdb.poster || detail.poster,
+          backdrop: tmdb.backdrop || detail.backdrop,
+          tmdb_id: tmdb.tmdb_id,
+        };
+      }
+
+      return detail;
+    }
+
+    // M3U: retrouver l’item par hash d’URL
+    if (!pl.url) throw new BadRequestException('Playlist M3U sans URL.');
+    const resp = await axios.get(pl.url, {
+      timeout: 60000,
+      responseType: 'text',
+      maxContentLength: 200 * 1024 * 1024,
+      decompress: true,
+      validateStatus: (s) => s >= 200 && s < 400,
+      headers: { 'User-Agent': 'NovaStream/1.0', Accept: '*/*' },
+    });
+    const items = parseM3U(resp.data || '');
+    const { movies } = classifyM3U(items);
+    const found = movies.find(m => idFrom(m.url) === idParam);
+    if (!found) throw new BadRequestException('Film introuvable dans la M3U.');
+
+    const baseDetail: any = {
+      id: idParam,
+      title: found.name,
+      year: this.yearFromTitle(found.name),
+      plot: null,
+      rating: null,
+      poster: found.logo || null,
+      backdrop: null,
+      stream_url: found.url,
+      source: 'M3U',
+    };
+
+    const tmdb = await this.tmdbFindByTitle(baseDetail.title || '', baseDetail.year || undefined);
+    if (tmdb) {
+      baseDetail.title = tmdb.title || baseDetail.title;
+      baseDetail.year = tmdb.year ?? baseDetail.year;
+      baseDetail.plot = tmdb.plot || baseDetail.plot;
+      baseDetail.rating = tmdb.rating ?? baseDetail.rating;
+      baseDetail.poster = tmdb.poster || baseDetail.poster;
+      baseDetail.backdrop = tmdb.backdrop || baseDetail.backdrop;
+      baseDetail.tmdb_id = tmdb.tmdb_id;
+    }
+
+    return baseDetail;
   }
 }
