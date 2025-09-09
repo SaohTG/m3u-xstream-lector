@@ -7,6 +7,7 @@ import { JwtAuthGuard } from '../auth/jwt.guard';
 export class VodController {
   constructor(private svc: VodService) {}
 
+  // Listes "simples"
   @Get('movies')
   movies(@Req() req: any) {
     return this.svc.movies(req.user.userId);
@@ -17,7 +18,7 @@ export class VodController {
     return this.svc.shows(req.user.userId);
   }
 
-  // Sections / rails
+  // Sections / rails (endpoint officiel)
   @Get('movies/sections')
   movieSections(@Req() req: any) {
     return this.svc.movieSections(req.user.userId);
@@ -26,5 +27,11 @@ export class VodController {
   @Get('shows/sections')
   showSections(@Req() req: any) {
     return this.svc.showSections(req.user.userId);
+  }
+
+  // ✅ Alias rétro-compat : certains fronts appellent encore /rails
+  @Get('movies/rails')
+  movieSectionsRails(@Req() req: any) {
+    return this.svc.movieSections(req.user.userId);
   }
 }
