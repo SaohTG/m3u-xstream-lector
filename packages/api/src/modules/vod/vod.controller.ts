@@ -16,4 +16,15 @@ export class VodController {
   shows(@Req() req: any) {
     return this.svc.shows(req.user.userId);
   }
+
+  // 👇 nouveaux rails
+  @Get('movies/rails')
+  moviesRails(@Req() req: any) {
+    return this.svc.moviesRails(req.user.userId);
+  }
+
+  @Get('shows/rails')
+  showsRails(@Req() req: any) {
+    return this.svc.showsRails(req.user.userId);
+  }
 }
