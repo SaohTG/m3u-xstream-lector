@@ -14,34 +14,34 @@ type ActivePlaylist = {
   password?: string | null;
 };
 
+type Movie = {
+  id: string | number;
+  title: string;
+  poster?: string | null;
+  year?: number | null;
+  plot?: string | null;
+  duration?: any;
+  rating?: any;
+  category_id?: any;
+  added?: number | null; // Xtream
+  group?: string | null; // M3U
+};
+
+type Show = {
+  id: string | number;
+  title: string;
+  poster?: string | null;
+  plot?: string | null;
+  rating?: any;
+  category_id?: any;
+  added?: number | null;
+  group?: string | null;
+};
+
+type Section<T> = { key: string; title: string; items: T[] };
+
 function idFrom(str: string) {
   return crypto.createHash('sha1').update(str).digest('hex');
-}
-
-function parseMaybeYear(val: any, name?: string): number | null {
-  if (typeof val === 'number') return val || null;
-  if (typeof val === 'string') {
-    const n = Number(val);
-    if (!isNaN(n) && n >= 1900 && n <= 2100) return n;
-    const m = val.match(/\b(19|20)\d{2}\b/);
-    if (m) return Number(m[0]);
-  }
-  if (name) {
-    const m = name.match(/\b(19|20)\d{2}\b/);
-    if (m) return Number(m[0]);
-  }
-  return null;
-}
-
-function parseMaybeTs(val: any): number | null {
-  if (typeof val === 'number') return val;
-  if (typeof val === 'string') {
-    const n = Number(val);
-    if (!isNaN(n) && n > 0) return n;
-    const d = Date.parse(val);
-    if (!isNaN(d)) return Math.floor(d / 1000);
-  }
-  return null;
 }
 
 @Injectable()
@@ -64,8 +64,46 @@ export class VodService {
     return res.data;
   }
 
-  // ---------- LISTES SIMPLES (déjà en place) ----------
-  async movies(userId: string) {
+  // ---------- Helpers sections ----------
+  private yearFromTitle(title?: string | null): number | null {
+    if (!title) return null;
+    const m = title.match(/\b(19|20)\d{2}\b/);
+    return m ? Number(m[0]) : null;
+  }
+
+  private topYears<T extends { title?: string; year?: number | null }>(items: T[], max = 3) {
+    const counts = new Map<number, number>();
+    for (const it of items) {
+      const y = (it.year as number) ?? this.yearFromTitle(it.title || '');
+      if (!y) continue;
+      counts.set(y, (counts.get(y) || 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[0] - a[0]).slice(0, max).map(([y]) => y);
+  }
+
+  private byGroup<T extends { group?: string | null; category_id?: any }>(
+    items: T[],
+    categoriesMap?: Record<string, string>,
+    max = 6,
+  ) {
+    const map = new Map<string, T[]>();
+    for (const it of items) {
+      const key =
+        (it as any).group ||
+        (it as any).category_id?.toString?.() ||
+        'Autres';
+      const name = categoriesMap?.[key] || key || 'Autres';
+      if (!map.has(name)) map.set(name, []);
+      map.get(name)!.push(it);
+    }
+    return [...map.entries()]
+      .sort((a, b) => b[1].length - a[1].length)
+      .slice(0, max)
+      .map(([title, arr]) => ({ key: `grp:${title}`, title, items: arr.slice(0, 24) as T[] }));
+  }
+
+  // ---------- Public lists ----------
+  async movies(userId: string): Promise<Movie[]> {
     const plMaybe = await this.playlists.getActiveForUser(userId);
     this.assertPlaylist(plMaybe);
     const pl = plMaybe;
@@ -74,66 +112,66 @@ export class VodService {
       if (!pl.base_url || !pl.username || !pl.password) {
         throw new BadRequestException('Playlist Xtream incomplète (base_url/username/password).');
       }
-
       let arr: any[] = [];
       try {
-        const data = await this.xtreamGet(pl.base_url, {
-          username: pl.username, password: pl.password, action: 'get_vod_streams',
-        });
+        const data = await this.xtreamGet(pl.base_url, { username: pl.username, password: pl.password, action: 'get_vod_streams' });
         if (Array.isArray(data)) arr = data;
       } catch (e) {
-        log.warn(`get_vod_streams direct a échoué: ${String((e as any)?.message || e)}`);
+        log.warn(`get_vod_streams direct: ${String((e as any)?.message || e)}`);
       }
-
       if (arr.length === 0) {
         try {
-          const cats = await this.xtreamGet(pl.base_url, {
-            username: pl.username, password: pl.password, action: 'get_vod_categories',
-          });
+          const cats = await this.xtreamGet(pl.base_url, { username: pl.username, password: pl.password, action: 'get_vod_categories' });
           if (Array.isArray(cats) && cats.length) {
             for (const c of cats.slice(0, 50)) {
               const cid = c.category_id ?? c.categoryID ?? c.categoryid;
               if (!cid) continue;
-              const d = await this.xtreamGet(pl.base_url, {
-                username: pl.username, password: pl.password, action: 'get_vod_streams', category_id: cid,
-              });
+              const d = await this.xtreamGet(pl.base_url, { username: pl.username, password: pl.password, action: 'get_vod_streams', category_id: cid });
               if (Array.isArray(d)) arr.push(...d);
               if (arr.length > 2000) break;
             }
           }
         } catch (e) {
-          log.warn(`fallback catégories VOD a échoué: ${String((e as any)?.message || e)}`);
+          log.warn(`fallback cats vod: ${String((e as any)?.message || e)}`);
         }
       }
-
-      return (arr || []).slice(0, 1000).map((x: any) => ({
+      return (arr || []).slice(0, 2000).map((x: any) => ({
         id: x.stream_id ?? x.streamId ?? x.id,
         title: x.name,
         poster: x.stream_icon || x.cover || null,
-        year: parseMaybeYear(x.year, x.name),
+        year: x.year || null,
         plot: x.plot || x.description || null,
         duration: x.duration || null,
         rating: x.rating || null,
         category_id: x.category_id || x.categoryid || null,
+        added: x.added ? Number(x.added) : null,
       }));
     }
 
     if (!pl.url) throw new BadRequestException('Playlist M3U sans URL.');
     const resp = await axios.get(pl.url, {
-      timeout: 60000, responseType: 'text', maxContentLength: 200 * 1024 * 1024,
-      decompress: true, validateStatus: (s) => s >= 200 && s < 400,
+      timeout: 60000,
+      responseType: 'text',
+      maxContentLength: 200 * 1024 * 1024,
+      decompress: true,
+      validateStatus: (s) => s >= 200 && s < 400,
       headers: { 'User-Agent': 'NovaStream/1.0', Accept: '*/*' },
     });
     const items = parseM3U(resp.data || '');
     const { movies } = classifyM3U(items);
-    return movies.slice(0, 1000).map((m) => ({
-      id: idFrom(m.url), title: m.name, poster: m.logo || null,
-      year: parseMaybeYear((m as any).year, m.name), plot: null, duration: null, rating: null,
-      category_id: m.group || null,
+    return movies.slice(0, 2000).map((m) => ({
+      id: idFrom(m.url),
+      title: m.name,
+      poster: m.logo || null,
+      year: this.yearFromTitle(m.name),
+      plot: null,
+      duration: null,
+      rating: null,
+      group: m.group || null,
     }));
   }
 
-  async shows(userId: string) {
+  async shows(userId: string): Promise<Show[]> {
     const plMaybe = await this.playlists.getActiveForUser(userId);
     this.assertPlaylist(plMaybe);
     const pl = plMaybe;
@@ -142,268 +180,164 @@ export class VodService {
       if (!pl.base_url || !pl.username || !pl.password) {
         throw new BadRequestException('Playlist Xtream incomplète (base_url/username/password).');
       }
-
       let arr: any[] = [];
       try {
-        const data = await this.xtreamGet(pl.base_url, {
-          username: pl.username, password: pl.password, action: 'get_series',
-        });
+        const data = await this.xtreamGet(pl.base_url, { username: pl.username, password: pl.password, action: 'get_series' });
         if (Array.isArray(data)) arr = data;
       } catch (e) {
-        log.warn(`get_series direct a échoué: ${String((e as any)?.message || e)}`);
+        log.warn(`get_series direct: ${String((e as any)?.message || e)}`);
       }
-
       if (arr.length === 0) {
         try {
-          const cats = await this.xtreamGet(pl.base_url, {
-            username: pl.username, password: pl.password, action: 'get_series_categories',
-          });
+          const cats = await this.xtreamGet(pl.base_url, { username: pl.username, password: pl.password, action: 'get_series_categories' });
           if (Array.isArray(cats) && cats.length) {
             for (const c of cats.slice(0, 50)) {
               const cid = c.category_id ?? c.categoryID ?? c.categoryid;
               if (!cid) continue;
-              const d = await this.xtreamGet(pl.base_url, {
-                username: pl.username, password: pl.password, action: 'get_series', category_id: cid,
-              });
+              const d = await this.xtreamGet(pl.base_url, { username: pl.username, password: pl.password, action: 'get_series', category_id: cid });
               if (Array.isArray(d)) arr.push(...d);
               if (arr.length > 2000) break;
             }
           }
         } catch (e) {
-          log.warn(`fallback catégories séries a échoué: ${String((e as any)?.message || e)}`);
+          log.warn(`fallback cats series: ${String((e as any)?.message || e)}`);
         }
       }
-
-      return (arr || []).slice(0, 1000).map((x: any) => ({
+      return (arr || []).slice(0, 2000).map((x: any) => ({
         id: x.series_id ?? x.seriesId ?? x.id,
         title: x.name,
         poster: x.cover || x.stream_icon || null,
         plot: x.plot || x.overview || null,
         rating: x.rating || null,
         category_id: x.category_id || x.categoryid || null,
-        // pas toujours d'année fiable côté séries
+        added: x.added ? Number(x.added) : null,
       }));
     }
 
     if (!pl.url) throw new BadRequestException('Playlist M3U sans URL.');
     const resp = await axios.get(pl.url, {
-      timeout: 60000, responseType: 'text', maxContentLength: 200 * 1024 * 1024,
-      decompress: true, validateStatus: (s) => s >= 200 && s < 400,
+      timeout: 60000,
+      responseType: 'text',
+      maxContentLength: 200 * 1024 * 1024,
+      decompress: true,
+      validateStatus: (s) => s >= 200 && s < 400,
       headers: { 'User-Agent': 'NovaStream/1.0', Accept: '*/*' },
     });
     const items = parseM3U(resp.data || '');
     const { shows } = classifyM3U(items);
-    return shows.slice(0, 1000).map((s) => ({
+    return shows.slice(0, 2000).map((s) => ({
       id: idFrom(s.url + 'series'),
-      title: s.name, poster: s.logo || null, plot: null, rating: null,
-      category_id: s.group || null,
+      title: s.name,
+      poster: s.logo || null,
+      plot: null,
+      rating: null,
+      group: s.group || null,
     }));
   }
 
-  // ---------- RAILS ----------
-  private normalizeTitle(t?: string | null) {
-    return (t || '').trim().replace(/\s+/g, ' ');
-  }
+  // ---------- SECTIONS / RAILS ----------
+  async movieSections(userId: string): Promise<Section<Movie>[]> {
+    const pl = await this.playlists.getActiveForUser(userId);
+    this.assertPlaylist(pl);
+    const movies = await this.movies(userId);
 
-  async moviesRails(userId: string) {
-    const plMaybe = await this.playlists.getActiveForUser(userId);
-    this.assertPlaylist(plMaybe);
-    const pl = plMaybe;
-
-    // XTREAM : on va chercher catégories + champs "added" & "year"
-    if (pl.type === 'XTREAM') {
-      const base = pl.base_url!, u = pl.username!, p = pl.password!;
-      // catégories
-      const catList = await this.xtreamGet(base, { username: u, password: p, action: 'get_vod_categories' }).catch(() => []);
-      const catNameById = new Map<string, string>();
-      if (Array.isArray(catList)) {
-        for (const c of catList) {
-          const id = String(c.category_id ?? c.categoryID ?? c.categoryid ?? '');
-          if (id) catNameById.set(id, this.normalizeTitle(c.category_name || c.name || 'Catégorie'));
-        }
-      }
-      // tous les films (direct + fallback cat si vide)
-      let items: any[] = [];
-      const direct = await this.xtreamGet(base, { username: u, password: p, action: 'get_vod_streams' }).catch(() => []);
-      if (Array.isArray(direct)) items = direct;
-      if (!items.length && catNameById.size) {
-        for (const [cid] of Array.from(catNameById.entries()).slice(0, 80)) {
-          const d = await this.xtreamGet(base, { username: u, password: p, action: 'get_vod_streams', category_id: cid }).catch(() => []);
-          if (Array.isArray(d)) items.push(...d);
-          if (items.length > 3000) break;
-        }
-      }
-
-      const normalized = items.map((x) => {
-        const year = parseMaybeYear(x.year, x.name);
-        const added_ts = parseMaybeTs(x.added ?? x.last_modified ?? x.create_date);
-        const catId = String(x.category_id ?? x.categoryid ?? '');
-        return {
-          id: x.stream_id ?? x.streamId ?? x.id,
-          title: this.normalizeTitle(x.name),
-          poster: x.stream_icon || x.cover || null,
-          year, plot: x.plot || x.description || null,
-          category_id: catId,
-          category_name: catNameById.get(catId) || null,
-          added_ts,
-        };
-      });
-
-      // rails
-      const rails: any[] = [];
-
-      // Récemment ajoutés (si on a "added_ts")
-      const withAdded = normalized.filter((n) => n.added_ts);
-      if (withAdded.length) {
-        withAdded.sort((a, b) => (b.added_ts! - a.added_ts!));
-        rails.push({ key: 'recent', title: 'Récemment ajoutés', items: withAdded.slice(0, 24) });
-      }
-
-      // Films 2025 (si dispo), puis 2024, 2023…
-      const currentYear = new Date().getFullYear();
-      for (const yr of [currentYear, currentYear - 1, currentYear + 1, 2025, 2024, 2023]) {
-        const yrItems = normalized.filter((n) => n.year === yr);
-        if (yrItems.length >= 6) {
-          rails.push({ key: `year-${yr}`, title: `Films ${yr}`, items: yrItems.slice(0, 24) });
-        }
-      }
-
-      // Top catégories (par volume)
-      const countByCat = new Map<string, number>();
-      for (const n of normalized) if (n.category_name) countByCat.set(n.category_name, (countByCat.get(n.category_name) || 0) + 1);
-      const topCats = Array.from(countByCat.entries()).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([name]) => name);
-
-      for (const name of topCats) {
-        const catItems = normalized.filter((n) => n.category_name === name).slice(0, 24);
-        if (catItems.length) rails.push({ key: `cat-${name}`, title: name, items: catItems });
-      }
-
-      return { rails };
-    }
-
-    // M3U : rails par groupes (group-title) + heuristique année + "Récents" (ordre du fichier)
-    if (!pl.url) throw new BadRequestException('Playlist M3U sans URL.');
-    const resp = await axios.get(pl.url, {
-      timeout: 60000, responseType: 'text', maxContentLength: 200 * 1024 * 1024,
-      decompress: true, validateStatus: (s) => s >= 200 && s < 400,
-      headers: { 'User-Agent': 'NovaStream/1.0', Accept: '*/*' },
-    });
-    const items = parseM3U(resp.data || '');
-    const { movies } = classifyM3U(items);
-
-    const norm = movies.map((m) => {
-      const year = parseMaybeYear((m as any).year, m.name);
-      return {
-        id: idFrom(m.url), title: this.normalizeTitle(m.name), poster: m.logo || null,
-        year, group: m.group || null, url: m.url,
-      };
-    });
-
-    const rails: any[] = [];
-
-    // "Récemment ajoutés" ≈ début de fichier
-    if (norm.length) rails.push({ key: 'recent', title: 'Récemment ajoutés', items: norm.slice(0, 24) });
-
-    // Films 2025 / 2024 / 2023 / 2022
-    for (const yr of [2025, 2024, 2023, 2022]) {
-      const yrItems = norm.filter((n) => n.year === yr);
-      if (yrItems.length >= 6) rails.push({ key: `year-${yr}`, title: `Films ${yr}`, items: yrItems.slice(0, 24) });
-    }
-
-    // Groupes les plus fournis
-    const byGroup = new Map<string, any[]>();
-    for (const n of norm) {
-      if (!n.group) continue;
-      const k = String(n.group);
-      if (!byGroup.has(k)) byGroup.set(k, []);
-      byGroup.get(k)!.push(n);
-    }
-    const topGroups = Array.from(byGroup.entries()).sort((a, b) => b[1].length - a[1].length).slice(0, 8);
-    for (const [g, arr] of topGroups) {
-      rails.push({ key: `group-${g}`, title: g, items: arr.slice(0, 24) });
-    }
-
-    return { rails };
-  }
-
-  async showsRails(userId: string) {
-    const plMaybe = await this.playlists.getActiveForUser(userId);
-    this.assertPlaylist(plMaybe);
-    const pl = plMaybe;
+    const out: Section<Movie>[] = [];
 
     if (pl.type === 'XTREAM') {
-      const base = pl.base_url!, u = pl.username!, p = pl.password!;
-      const catList = await this.xtreamGet(base, { username: u, password: p, action: 'get_series_categories' }).catch(() => []);
-      const catNameById = new Map<string, string>();
-      if (Array.isArray(catList)) {
-        for (const c of catList) {
-          const id = String(c.category_id ?? c.categoryID ?? c.categoryid ?? '');
-          if (id) catNameById.set(id, this.normalizeTitle(c.category_name || c.name || 'Catégorie'));
-        }
-      }
-      let items: any[] = [];
-      const direct = await this.xtreamGet(base, { username: u, password: p, action: 'get_series' }).catch(() => []);
-      if (Array.isArray(direct)) items = direct;
-      if (!items.length && catNameById.size) {
-        for (const [cid] of Array.from(catNameById.entries()).slice(0, 80)) {
-          const d = await this.xtreamGet(base, { username: u, password: p, action: 'get_series', category_id: cid }).catch(() => []);
-          if (Array.isArray(d)) items.push(...d);
-          if (items.length > 3000) break;
-        }
-      }
+      const recent = movies.filter(m => typeof m.added === 'number')
+        .sort((a, b) => (b.added! - a.added!)).slice(0, 30);
+      if (recent.length) out.push({ key: 'recent', title: 'Récemment ajoutés', items: recent });
 
-      const normalized = items.map((x) => {
-        const catId = String(x.category_id ?? x.categoryid ?? '');
-        const added_ts = parseMaybeTs(x.added ?? x.last_modified ?? x.create_date);
-        return {
-          id: x.series_id ?? x.seriesId ?? x.id,
-          title: this.normalizeTitle(x.name),
-          poster: x.cover || x.stream_icon || null,
-          plot: x.plot || x.overview || null,
-          category_id: catId,
-          category_name: catNameById.get(catId) || null,
-          added_ts,
-        };
-      });
-
-      const rails: any[] = [];
-      const withAdded = normalized.filter((n) => n.added_ts);
-      if (withAdded.length) {
-        withAdded.sort((a, b) => (b.added_ts! - a.added_ts!));
-        rails.push({ key: 'recent', title: 'Récemment ajoutées', items: withAdded.slice(0, 24) });
-      }
-      const countByCat = new Map<string, number>();
-      for (const n of normalized) if (n.category_name) countByCat.set(n.category_name, (countByCat.get(n.category_name) || 0) + 1);
-      const topCats = Array.from(countByCat.entries()).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([name]) => name);
-      for (const name of topCats) {
-        const catItems = normalized.filter((n) => n.category_name === name).slice(0, 24);
-        if (catItems.length) rails.push({ key: `cat-${name}`, title: name, items: catItems });
-      }
-      return { rails };
+      let catsMap: Record<string, string> = {};
+      try {
+        const cats = await this.xtreamGet(pl.base_url!, { username: pl.username!, password: pl.password!, action: 'get_vod_categories' });
+        if (Array.isArray(cats)) {
+          catsMap = Object.fromEntries(
+            cats.map((c: any) => [String(c.category_id ?? c.categoryID ?? c.categoryid), String(c.category_name ?? c.categoryName ?? c.name ?? 'Autres')])
+          );
+        }
+      } catch {}
+      out.push(...this.byGroup(movies, catsMap, 8));
+    } else {
+      if (movies.length) out.push({ key: 'recent', title: 'Récemment ajoutés', items: movies.slice(0, 30) });
+      out.push(...this.byGroup(movies, undefined, 8));
     }
 
-    // M3U : regrouper par group-title
-    if (!pl.url) throw new BadRequestException('Playlist M3U sans URL.');
-    const resp = await axios.get(pl.url, {
-      timeout: 60000, responseType: 'text', maxContentLength: 200 * 1024 * 1024,
-      decompress: true, validateStatus: (s) => s >= 200 && s < 400,
-      headers: { 'User-Agent': 'NovaStream/1.0', Accept: '*/*' },
-    });
-    const items = parseM3U(resp.data || '');
-    const { shows } = classifyM3U(items);
+    const years = this.topYears(movies, 3);
+    for (const y of years) {
+      const arr = movies.filter(m => (m.year ?? this.yearFromTitle(m.title)) === y).slice(0, 24);
+      if (arr.length) out.push({ key: `year:${y}`, title: `Films ${y}`, items: arr });
+    }
 
-    const norm = shows.map((s) => ({
-      id: idFrom(s.url + 'series'), title: this.normalizeTitle(s.name), poster: s.logo || null, group: s.group || null, url: s.url,
-    }));
+    return out;
+  }
 
-    const rails: any[] = [];
-    if (norm.length) rails.push({ key: 'recent', title: 'Récemment ajoutées', items: norm.slice(0, 24) });
+  async showSections(userId: string): Promise<Section<Show>[]> {
+    const pl = await this.playlists.getActiveForUser(userId);
+    this.assertPlaylist(pl);
+    const shows = await this.shows(userId);
 
-    const byGroup = new Map<string, any[]>();
-    for (const n of norm) { const g = n.group || ''; if (!g) continue; if (!byGroup.has(g)) byGroup.set(g, []); byGroup.get(g)!.push(n); }
-    const topGroups = Array.from(byGroup.entries()).sort((a, b) => b[1].length - a[1].length).slice(0, 8);
-    for (const [g, arr] of topGroups) rails.push({ key: `group-${g}`, title: g, items: arr.slice(0, 24) });
+    const out: Section<Show>[] = [];
 
-    return { rails };
+    // Récents par 'added' si dispo
+    const recent = shows
+      .filter(s => typeof s.added === 'number')
+      .sort((a, b) => (b.added! - a.added!))
+      .slice(0, 30);
+    if (recent.length) out.push({ key: 'recent', title: 'Récemment ajoutées', items: recent });
+
+    // Mapping catégories Xtream
+    let catsMap: Record<string, string> = {};
+    const mapXtream =
+      pl.type === 'XTREAM' && pl.base_url && pl.username && pl.password;
+    if (mapXtream) {
+      try {
+        const cats = await this.xtreamGet(pl.base_url!, {
+          username: pl.username!, password: pl.password!, action: 'get_series_categories',
+        });
+        if (Array.isArray(cats)) {
+          catsMap = Object.fromEntries(
+            cats.map((c: any) => [
+              String(c.category_id ?? c.categoryID ?? c.categoryid),
+              String(c.category_name ?? c.categoryName ?? c.name ?? 'Autres'),
+            ]),
+          );
+        }
+      } catch {}
+    }
+
+    // Regroupement robuste
+    const buckets = new Map<string, Show[]>();
+    const deriveFromTitle = (t?: string | null): string | null => {
+      if (!t) return null;
+      const mBracket = t.match(/^\s*\[([^\]]+)\]/); // [Drama] Title
+      if (mBracket) return mBracket[1].trim();
+      const parts = t.split(/[-|•–—]/);
+      if (parts.length >= 2 && parts[0].trim().length >= 3) return parts[0].trim().slice(0, 40);
+      return null;
+    };
+
+    for (const s of shows) {
+      let key: string | null =
+        (s as any).group && String((s as any).group) ||
+        (s as any).category_id != null ? String((s as any).category_id) : null;
+
+      if (!key) key = deriveFromTitle(s.title);
+      if (!key || key.toLowerCase() === 'null') key = 'Autres';
+
+      const display = catsMap[key] || key;
+      if (!buckets.has(display)) buckets.set(display, []);
+      buckets.get(display)!.push(s);
+    }
+
+    const sorted = [...buckets.entries()]
+      .sort((a, b) => b[1].length - a[1].length)
+      .slice(0, 8);
+
+    for (const [name, arr] of sorted) {
+      out.push({ key: `grp:${name}`, title: name, items: arr.slice(0, 24) });
+    }
+
+    return out;
   }
 }
