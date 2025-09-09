@@ -1,25 +1,28 @@
-import { Body, Controller, Get, Post, Req, UseGuards, UnauthorizedException } from '@nestjs/common';
-import { PlaylistsService } from './playlists.service';
-import { LinkPlaylistDto } from './dto/link-playlist.dto';
+import { Body, Controller, Delete, Get, Post, Req, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt.guard';
+import { PlaylistsService } from './playlists.service';
+
+type LinkDto =
+  | { type: 'M3U'; url: string }
+  | { type: 'XTREAM'; base_url: string; username: string; password: string };
 
 @Controller('playlists')
 @UseGuards(JwtAuthGuard)
 export class PlaylistsController {
-  constructor(private readonly svc: PlaylistsService) {}
-
-  @Post('link')
-  async link(@Body() body: LinkPlaylistDto, @Req() req: any) {
-    const userId = req.user?.userId as string | undefined;
-    if (!userId) throw new UnauthorizedException('Utilisateur non authentifié');
-    return this.svc.link(body, userId); // ✅ 2 arguments: dto + userId
-  }
+  constructor(private svc: PlaylistsService) {}
 
   @Get('me')
-  async me(@Req() req: any) {
-    const userId = req.user?.userId as string | undefined;
-    if (!userId) throw new UnauthorizedException('Utilisateur non authentifié');
-    const pl = await this.svc.getActiveForUser(userId);
-    return { playlist: pl };
+  me(@Req() req: any) {
+    return this.svc.me(req.user.userId);
+  }
+
+  @Post('link')
+  link(@Req() req: any, @Body() dto: LinkDto) {
+    return this.svc.link(req.user.userId, dto);
+  }
+
+  @Delete('unlink')
+  unlink(@Req() req: any) {
+    return this.svc.unlink(req.user.userId);
   }
 }
