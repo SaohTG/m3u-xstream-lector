@@ -28,7 +28,6 @@ services:
       timeout: 5s
       retries: 10
 
-  # --- API NestJS ---
   api:
     build:
       context: ./packages/api
@@ -43,17 +42,13 @@ services:
     environment:
       NODE_ENV: production
       PORT: "3000"
-      # DB / Redis
       DATABASE_URL: postgresql://novastream:novastream@postgres:5432/novastream
       REDIS_URL: redis://redis:6379/0
-      # Auth
       JWT_ACCESS_SECRET: "dev_access_secret_change_me"
       JWT_REFRESH_SECRET: "dev_refresh_secret_change_me"
-      # CORS (mets ici l’URL d’accès au front)
       CORS_ORIGIN: "http://85.31.239.110:5173"
-      # Enrichissement TMDB (optionnel mais recommandé)
       TMDB_API_KEY: "d8175301037c00f3c719478998396539"
-      # S3/MinIO (optionnel — commente si non utilisé)
+      # Commente ces 4 lignes si tu ne veux pas de MinIO:
       S3_ENDPOINT: "http://minio:9000"
       S3_BUCKET: "novastream"
       S3_ACCESS_KEY: "admin"
@@ -61,7 +56,6 @@ services:
     ports:
       - "3000:3000"
 
-  # --- Front Web (Vite) ---
   web:
     build:
       context: ./packages/web
@@ -69,14 +63,13 @@ services:
     container_name: iptv-saas-web
     restart: unless-stopped
     environment:
-      # Base API vue par le navigateur (mets l’IP/DNS public de ton serveur)
       VITE_API_BASE: "http://85.31.239.110:3000"
     depends_on:
       - api
     ports:
       - "5173:5173"
 
-  # --- MinIO (stockage objets compatible S3) - OPTIONNEL ---
+  # MinIO optionnel (commente si inutile)
   minio:
     image: quay.io/minio/minio:RELEASE.2024-07-26T20-48-21Z
     container_name: iptv-saas-minio
@@ -88,23 +81,13 @@ services:
     volumes:
       - minio-data:/data
     ports:
-      - "9000:9000"  # S3 API
-      - "9001:9001"  # Console Web
+      - "9000:9000"
+      - "9001:9001"
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/ready"]
       interval: 15s
       timeout: 5s
       retries: 10
-
-  # --- Mock Xtream (pour tests) ---
-  xtream-mock:
-    build:
-      context: ./packages/xtream-mock
-      dockerfile: Dockerfile
-    container_name: iptv-saas-xtream-mock
-    restart: unless-stopped
-    ports:
-      - "8888:8080"
 
 volumes:
   pgdata:
