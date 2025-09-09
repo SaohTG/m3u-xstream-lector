@@ -1,4 +1,5 @@
 import React from 'react';
+import ReactDOM from 'react-dom/client';
 import { Navigate, Outlet, RouterProvider, createBrowserRouter, Link } from 'react-router-dom';
 import { getToken } from './lib/api';
 import Movies from './routes/Movies';
@@ -60,15 +61,27 @@ const router = createBrowserRouter([
   },
 ]);
 
-// Log des erreurs asynchrones pour debug
+// Log des erreurs async pour debug (aide en cas d'écran blanc)
 window.addEventListener('unhandledrejection', (e) => {
   console.error('Unhandled promise rejection:', e.reason);
 });
 
-export default function App() {
-  return (
-    <AppErrorBoundary>
-      <RouterProvider router={router} />
-    </AppErrorBoundary>
+function App() {
+  return <RouterProvider router={router} />;
+}
+
+// ✅ Monte l’app dans #root
+const rootEl = document.getElementById('root');
+if (!rootEl) {
+  console.error('Élément #root introuvable dans index.html');
+} else {
+  ReactDOM.createRoot(rootEl).render(
+    <React.StrictMode>
+      <AppErrorBoundary>
+        <App />
+      </AppErrorBoundary>
+    </React.StrictMode>
   );
 }
+
+export default App;
