@@ -4,10 +4,7 @@ import { api } from '../lib/api';
 
 type LinkType = 'M3U' | 'XTREAM';
 
-const defaultXtreamBaseUrl =
-  typeof window !== 'undefined'
-    ? `http://${window.location.hostname}:8888`
-    : 'http://localhost:8888';
+const defaultXtreamBaseUrl = ''; // pas de valeur par défaut pour éviter toute auto-validation
 
 export default function Onboarding() {
   const nav = useNavigate();
@@ -20,8 +17,8 @@ export default function Onboarding() {
 
   // Xtream
   const [baseUrl, setBaseUrl] = useState<string>(defaultXtreamBaseUrl);
-  const [username, setUsername] = useState<string>('u');
-  const [password, setPassword] = useState<string>('p');
+  const [username, setUsername] = useState<string>('');
+  const [password, setPassword] = useState<string>('');
 
   // UI state
   const [submitting, setSubmitting] = useState<boolean>(false);
@@ -48,17 +45,15 @@ export default function Onboarding() {
 
       const res = await api('/playlists/link', { method: 'POST', body });
 
-      // On n’autorise la redirection que si l’API confirme la validation
+      // On n’autorise la redirection que si l’API confirme explicitement la validation
       if (!res || res.validated !== true) {
-        throw new Error(
-          typeof res?.message === 'string'
-            ? res.message
-            : 'Validation échouée — vérifiez vos informations.'
-        );
+        const msg =
+          (typeof res?.message === 'string' && res.message) ||
+          'Validation échouée — vérifiez vos informations.';
+        throw new Error(msg);
       }
 
       setOk(true);
-      // petite pause UX puis redirection vers Films
       setTimeout(() => nav('/movies'), 800);
     } catch (e: any) {
       setErr(e?.message || 'Erreur inconnue');
@@ -68,7 +63,7 @@ export default function Onboarding() {
   }
 
   return (
-    <div style={{ maxWidth: 760, margin: '48px auto', padding: '0 16px', fontFamily: 'system-ui, sans-serif' }}>
+    <div style={{ maxWidth: 760, margin: '48px auto', padding: '0 16px', fontFamily: 'system-ui, sans-serif', color: '#eee' }}>
       <h1 style={{ marginBottom: 8 }}>Onboarding</h1>
       <p style={{ opacity: 0.8, marginTop: 0 }}>
         Configurez votre source IPTV avant d’accéder au contenu.
@@ -84,7 +79,7 @@ export default function Onboarding() {
               borderRadius: 999,
               border: '1px solid #333',
               background: step === s ? '#111' : 'transparent',
-              color: step === s ? '#fff' : '#333',
+              color: step === s ? '#fff' : '#999',
               fontSize: 13,
             }}
           >
@@ -147,7 +142,7 @@ export default function Onboarding() {
                     onChange={(e) => setM3uUrl(e.target.value)}
                     required
                     pattern="https?://.+"
-                    style={{ padding: '10px 12px', border: '1px solid #333', borderRadius: 8 }}
+                    style={{ padding: '10px 12px', border: '1px solid #333', borderRadius: 8, background: '#222', color: '#eee' }}
                   />
                 </label>
               </>
@@ -156,12 +151,12 @@ export default function Onboarding() {
                 <label style={{ display: 'grid', gap: 6 }}>
                   <span>Base URL Xtream</span>
                   <input
-                    placeholder="http://IP:PORT"
+                    placeholder="http://IP:PORT (ex: http://85.31.239.110:8080)"
                     value={baseUrl}
                     onChange={(e) => setBaseUrl(e.target.value)}
                     required
-                    pattern="https?://.+|http?://.+"
-                    style={{ padding: '10px 12px', border: '1px solid #333', borderRadius: 8 }}
+                    pattern="https?://.+"
+                    style={{ padding: '10px 12px', border: '1px solid #333', borderRadius: 8, background: '#222', color: '#eee' }}
                   />
                 </label>
                 <div style={{ display: 'grid', gap: 12, gridTemplateColumns: '1fr 1fr' }}>
@@ -172,7 +167,7 @@ export default function Onboarding() {
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
                       required
-                      style={{ padding: '10px 12px', border: '1px solid #333', borderRadius: 8 }}
+                      style={{ padding: '10px 12px', border: '1px solid #333', borderRadius: 8, background: '#222', color: '#eee' }}
                     />
                   </label>
                   <label style={{ display: 'grid', gap: 6 }}>
@@ -182,7 +177,7 @@ export default function Onboarding() {
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       required
-                      style={{ padding: '10px 12px', border: '1px solid #333', borderRadius: 8 }}
+                      style={{ padding: '10px 12px', border: '1px solid #333', borderRadius: 8, background: '#222', color: '#eee' }}
                     />
                   </label>
                 </div>
