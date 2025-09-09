@@ -5,6 +5,15 @@ export function getToken(): string | null {
   catch { return null; }
 }
 
+export function setToken(token: string | null) {
+  try {
+    if (token) localStorage.setItem('ns_token', token);
+    else localStorage.removeItem('ns_token');
+  } catch {
+    // ignore storage errors (Private mode, etc.)
+  }
+}
+
 export async function api(path: string, opts: RequestInit = {}) {
   const token = getToken();
   const url = `${BASE}${path}`;
@@ -19,7 +28,10 @@ export async function api(path: string, opts: RequestInit = {}) {
     credentials: 'omit',
   });
   const ct = res.headers.get('content-type') || '';
-  const body = ct.includes('application/json') ? await res.json().catch(() => ({})) : await res.text().catch(() => '');
+  const body = ct.includes('application/json')
+    ? await res.json().catch(() => ({}))
+    : await res.text().catch(() => '');
+
   if (!res.ok) {
     const snippet = typeof body === 'string' ? body.slice(0, 200) : JSON.stringify(body).slice(0, 200);
     throw new Error(`${res.status} ${res.statusText} – ${snippet}`);
