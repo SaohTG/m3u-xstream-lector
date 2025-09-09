@@ -19,6 +19,7 @@ services:
       context: ./packages/api
     container_name: iptv-saas-api
     environment:
+      TMDB_API_KEY: "d8175301037c00f3c719478998396539"
       # DB
       DATABASE_URL: postgres://novastream:novastream@postgres:5432/novastream
       # API
