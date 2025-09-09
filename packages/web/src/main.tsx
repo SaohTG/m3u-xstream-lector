@@ -7,6 +7,7 @@ import Live from './routes/Live';
 import Onboarding from './routes/Onboarding';
 import Auth from './routes/Auth';
 import MovieDetails from './routes/MovieDetails';
+import AppErrorBoundary from './AppErrorBoundary';
 
 function Protected({ children }: { children?: React.ReactNode }) {
   const t = getToken();
@@ -54,12 +55,20 @@ const router = createBrowserRouter([
       { path: '/movies', element: <Protected><Movies /></Protected> },
       { path: '/shows',  element: <Protected><Shows /></Protected> },
       { path: '/live',   element: <Protected><Live /></Protected> },
-      // ✅ nouvelle route
       { path: '/movie/:id', element: <Protected><MovieDetails /></Protected> },
     ]
   },
 ]);
 
+// Log des erreurs asynchrones pour debug
+window.addEventListener('unhandledrejection', (e) => {
+  console.error('Unhandled promise rejection:', e.reason);
+});
+
 export default function App() {
-  return <RouterProvider router={router} />;
+  return (
+    <AppErrorBoundary>
+      <RouterProvider router={router} />
+    </AppErrorBoundary>
+  );
 }
