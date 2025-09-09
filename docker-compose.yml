@@ -4,91 +4,108 @@ services:
   postgres:
     image: postgres:15-alpine
     container_name: iptv-saas-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_DB: novastream
       POSTGRES_USER: novastream
       POSTGRES_PASSWORD: novastream
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-    restart: unless-stopped
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U novastream -d novastream"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
+  redis:
+    image: redis:7-alpine
+    container_name: iptv-saas-redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # --- API NestJS ---
   api:
     build:
       context: ./packages/api
+      dockerfile: Dockerfile
     container_name: iptv-saas-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
     environment:
+      NODE_ENV: production
+      PORT: "3000"
+      # DB / Redis
+      DATABASE_URL: postgresql://novastream:novastream@postgres:5432/novastream
+      REDIS_URL: redis://redis:6379/0
+      # Auth
+      JWT_ACCESS_SECRET: "dev_access_secret_change_me"
+      JWT_REFRESH_SECRET: "dev_refresh_secret_change_me"
+      # CORS (mets ici l’URL d’accès au front)
+      CORS_ORIGIN: "http://85.31.239.110:5173"
+      # Enrichissement TMDB (optionnel mais recommandé)
       TMDB_API_KEY: "d8175301037c00f3c719478998396539"
-      # DB
-      DATABASE_URL: postgres://novastream:novastream@postgres:5432/novastream
-      # API
-      API_PORT: "3000"
-      JWT_SECRET: "change_me_super_secret"
-      NODE_ENV: "development"  # installe aussi les devDeps dans l'image si nécessaire
-      # S3/MinIO
+      # S3/MinIO (optionnel — commente si non utilisé)
       S3_ENDPOINT: "http://minio:9000"
       S3_BUCKET: "novastream"
       S3_ACCESS_KEY: "admin"
       S3_SECRET_KEY: "changeme123"
-    depends_on:
-      - postgres
     ports:
       - "3000:3000"
-    restart: unless-stopped
 
+  # --- Front Web (Vite) ---
   web:
     build:
       context: ./packages/web
+      dockerfile: Dockerfile
     container_name: iptv-saas-web
+    restart: unless-stopped
     environment:
-      # ⚠️ Mets ici ton IP/domaine public de l’API
+      # Base API vue par le navigateur (mets l’IP/DNS public de ton serveur)
       VITE_API_BASE: "http://85.31.239.110:3000"
     depends_on:
       - api
     ports:
       - "5173:5173"
-    restart: unless-stopped
 
-  # Mock Xtream sans fichier (script inline)
-  xtream-mock:
-    image: node:20-alpine
-    container_name: iptv-saas-xtream-mock
-    command: >
-      node -e "const http=require('http'),{URL}=require('url');
-      function J(r,c,o){o=JSON.stringify(o);r.writeHead(c,{'Content-Type':'application/json','Access-Control-Allow-Origin':'*'});r.end(o);}
-      http.createServer((q,s)=>{
-        try{
-          const u=new URL(q.url,'http://'+q.headers.host);
-          if(u.pathname!='/player_api.php')return J(s,404,{error:'not found'});
-          const user=u.searchParams.get('username')||'',pass=u.searchParams.get('password')||'',action=u.searchParams.get('action')||'';
-          const ok=(user==='u'&&pass==='p');
-          if(!ok)return J(s,200,{user_info:{auth:0,status:'Expired'},server_info:{url:q.headers.host}});
-          if(action==='get_live_streams')return J(s,200,[{name:'News HD',stream_id:1,stream_type:'live',category_id:1,stream_icon:''},{name:'Sport 1',stream_id:2,stream_type:'live',category_id:2,stream_icon:''}]);
-          if(action==='get_vod_streams')return J(s,200,[{name:'Mock Movie',stream_id:100,stream_icon:'',year:2020,rating:8.2,category_id:10,plot:'Demo movie'}]);
-          if(action==='get_series')return J(s,200,[{name:'Mock Show',series_id:200,cover:'',plot:'Demo series',rating:7.7,category_id:20}]);
-          return J(s,200,{user_info:{auth:1,status:'Active'},server_info:{url:q.headers.host}});
-        }catch(e){return J(s,500,{error:String(e.message||e)})}
-      }).listen(8888,'0.0.0.0',()=>console.log('xtream-mock on 8888'));"
-    ports:
-      - "8888:8888"
-    restart: unless-stopped
-
-  # MinIO (image officielle) — plus simple côté permissions
+  # --- MinIO (stockage objets compatible S3) - OPTIONNEL ---
   minio:
-    image: minio/minio:latest
+    image: quay.io/minio/minio:RELEASE.2024-07-26T20-48-21Z
     container_name: iptv-saas-minio
-    command: server /data --console-address ":9001"
-    environment:
-      - MINIO_ROOT_USER=admin
-      - MINIO_ROOT_PASSWORD=changeme123
-    volumes:
-      - minio_data:/data
-    ports:
-      - "9000:9000"  # API S3
-      - "9001:9001"  # Console web
     restart: unless-stopped
+    command: server --console-address ":9001" /data
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: changeme123
+    volumes:
+      - minio-data:/data
+    ports:
+      - "9000:9000"  # S3 API
+      - "9001:9001"  # Console Web
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  # --- Mock Xtream (pour tests) ---
+  xtream-mock:
+    build:
+      context: ./packages/xtream-mock
+      dockerfile: Dockerfile
+    container_name: iptv-saas-xtream-mock
+    restart: unless-stopped
+    ports:
+      - "8888:8080"
 
 volumes:
-  postgres_data:
-  minio_data:
+  pgdata:
+  minio-data:
