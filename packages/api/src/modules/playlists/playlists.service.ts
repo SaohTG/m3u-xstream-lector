@@ -9,7 +9,7 @@ export class PlaylistsService {
     if (dto.type === 'M3U') {
       if (!dto.url) throw new BadRequestException('URL M3U manquante');
 
-      // On lit SEULEMENT les premiers ~4Ko en streaming (plus robuste & rapide)
+      // Lecture en streaming des premiers ~4Ko pour valider le header #EXTM3U
       try {
         const res = await axios.get(dto.url, {
           timeout: 8000,
@@ -18,9 +18,8 @@ export class PlaylistsService {
           validateStatus: (s) => s >= 200 && s < 400,
           headers: {
             'User-Agent': 'NovaStream/1.0 (+https://example.com)',
-            'Accept': '*/*',
+            Accept: '*/*',
           },
-          // si certains serveurs ont des certifs bancales (à éviter en prod)
           httpsAgent: new https.Agent({ rejectUnauthorized: true }),
         });
 
@@ -29,8 +28,7 @@ export class PlaylistsService {
           res.data.on('data', (chunk: Buffer) => {
             headBuf = Buffer.concat([headBuf, chunk]);
             if (headBuf.length >= 4096) {
-              // On a assez de données -> stoppe le stream
-              res.data.destroy();
+              res.data.destroy(); // stoppe rapidement le stream
               resolve();
             }
           });
@@ -38,23 +36,18 @@ export class PlaylistsService {
           res.data.on('error', (err: any) => reject(err));
         });
 
-        // Convertit en texte + gère BOM + espaces en tête
         const headStr = headBuf
           .slice(0, 4096)
           .toString('utf8')
-          .replace(/^\uFEFF/, '') // BOM UTF-8
-          .replace(/^\s+/, '');   // espaces / CRLF en tête
+          .replace(/^\uFEFF/, '') // retire BOM UTF-8
+          .replace(/^\s+/, ''); // retire espaces éventuels en tête
 
         if (!/^#EXTM3U/i.test(headStr)) {
           throw new BadRequestException('Fichier M3U invalide : en-tête #EXTM3U absent.');
         }
       } catch (e: any) {
-        if (e?.response) {
-          throw new BadRequestException(`M3U inaccessible (HTTP ${e.response.status}).`);
-        }
-        if (e?.code === 'ECONNABORTED') {
-          throw new BadRequestException('M3U timeout (8s).');
-        }
+        if (e?.response) throw new BadRequestException(`M3U inaccessible (HTTP ${e.response.status}).`);
+        if (e?.code === 'ECONNABORTED') throw new BadRequestException('M3U timeout (8s).');
         if (e instanceof BadRequestException) throw e;
         throw new BadRequestException(`Erreur M3U: ${e?.message || 'inconnue'}`);
       }
@@ -62,28 +55,42 @@ export class PlaylistsService {
 
     if (dto.type === 'XTREAM') {
       const base = (dto.baseUrl || '').replace(/\/+$/, '');
+      if (!/^https?:\/\//i.test(base)) {
+        throw new BadRequestException('baseUrl doit commencer par http:// ou https://');
+      }
       if (!base || !dto.username || !dto.password) {
         throw new BadRequestException('Champs Xtream manquants (baseUrl, username, password).');
       }
+
       const url = `${base}/player_api.php?username=${encodeURIComponent(dto.username)}&password=${encodeURIComponent(dto.password)}`;
+
       try {
         const res = await axios.get(url, {
           timeout: 8000,
-          validateStatus: (s) => s >= 200 && s < 400,
-          headers: { 'User-Agent': 'NovaStream/1.0' },
-          maxRedirects: 3,
+          maxRedirects: 2,
+          validateStatus: (s) => s >= 200 && s < 500,
+          headers: { 'User-Agent': 'NovaStream/1.0', Accept: 'application/json' },
         });
-        const data = res.data || {};
-        const auth = Number(data?.user_info?.auth) === 1;
-        const status = String(data?.user_info?.status || '').toLowerCase();
-        const active = status.includes('active'); // plus tolérant (ex: "Active")
+
+        // Refuser tout ce qui n'est pas un JSON exploitable
+        if (typeof res.data !== 'object' || res.data === null) {
+          throw new UnauthorizedException('Réponse non JSON — URL Xtream invalide.');
+        }
+
+        const ui = res.data?.user_info;
+        if (!ui) throw new UnauthorizedException('Réponse Xtream invalide (user_info manquant).');
+
+        const auth = Number(ui.auth) === 1;
+        const statusStr = String(ui.status ?? '').toLowerCase();
+        const active = statusStr.includes('active'); // gère Active/ACTIVE
+
         if (!auth || !active) {
           throw new UnauthorizedException('Identifiants Xtream invalides ou compte inactif.');
         }
       } catch (e: any) {
+        if (e instanceof UnauthorizedException) throw e;
         if (e?.response) throw new UnauthorizedException(`Xtream rejeté (HTTP ${e.response.status}).`);
         if (e?.code === 'ECONNABORTED') throw new BadRequestException('Xtream timeout (8s).');
-        if (e instanceof UnauthorizedException) throw e;
         throw new BadRequestException(`Erreur Xtream: ${e?.message || 'inconnue'}`);
       }
     }
