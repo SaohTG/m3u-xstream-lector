@@ -3,9 +3,16 @@ import { PlaylistsService } from '../playlists/playlists.service';
 import axios from 'axios';
 import { classifyM3U, parseM3U } from '../../utils/m3u';
 import * as crypto from 'crypto';
-import { Playlist } from '../playlists/playlist.entity';
 
 const log = new Logger('VodService');
+
+type ActivePlaylist = {
+  type: 'M3U' | 'XTREAM';
+  url?: string | null;
+  base_url?: string | null;
+  username?: string | null;
+  password?: string | null;
+};
 
 function idFrom(str: string) {
   return crypto.createHash('sha1').update(str).digest('hex');
@@ -15,7 +22,7 @@ function idFrom(str: string) {
 export class VodService {
   constructor(private playlists: PlaylistsService) {}
 
-  private assertPlaylist(pl: Playlist | null): asserts pl is Playlist {
+  private assertPlaylist(pl: ActivePlaylist | null): asserts pl is ActivePlaylist {
     if (!pl) throw new BadRequestException('Aucune source liée.');
   }
 
@@ -40,7 +47,6 @@ export class VodService {
       if (!pl.base_url || !pl.username || !pl.password) {
         throw new BadRequestException('Playlist Xtream incomplète (base_url/username/password).');
       }
-
       let arr: any[] = [];
       try {
         const data = await this.xtreamGet(pl.base_url, {
@@ -50,7 +56,6 @@ export class VodService {
       } catch (e) {
         log.warn(`get_vod_streams direct a échoué: ${String((e as any)?.message || e)}`);
       }
-
       if (arr.length === 0) {
         try {
           const cats = await this.xtreamGet(pl.base_url, {
@@ -71,7 +76,6 @@ export class VodService {
           log.warn(`fallback catégories VOD a échoué: ${String((e as any)?.message || e)}`);
         }
       }
-
       return (arr || []).slice(0, 1000).map((x: any) => ({
         id: x.stream_id ?? x.streamId ?? x.id,
         title: x.name,
@@ -116,7 +120,6 @@ export class VodService {
       if (!pl.base_url || !pl.username || !pl.password) {
         throw new BadRequestException('Playlist Xtream incomplète (base_url/username/password).');
       }
-
       let arr: any[] = [];
       try {
         const data = await this.xtreamGet(pl.base_url, {
@@ -126,7 +129,6 @@ export class VodService {
       } catch (e) {
         log.warn(`get_series direct a échoué: ${String((e as any)?.message || e)}`);
       }
-
       if (arr.length === 0) {
         try {
           const cats = await this.xtreamGet(pl.base_url, {
@@ -147,7 +149,6 @@ export class VodService {
           log.warn(`fallback catégories séries a échoué: ${String((e as any)?.message || e)}`);
         }
       }
-
       return (arr || []).slice(0, 1000).map((x: any) => ({
         id: x.series_id ?? x.seriesId ?? x.id,
         title: x.name,
