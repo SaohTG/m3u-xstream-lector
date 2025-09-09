@@ -1,14 +1,18 @@
 {
   "compilerOptions": {
+    "target": "ES2020",
     "module": "commonjs",
-    "target": "ES2021",
-    "lib": ["ES2021"],
+    "lib": ["ES2020"],
+    "rootDir": "src",
+    "outDir": "dist",
+    "strict": true,
+    "strictPropertyInitialization": false,
+    "esModuleInterop": true,
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
-    "strict": true,
-    "esModuleInterop": true,
-    "outDir": "dist",
-    "rootDir": "src"
+    "skipLibCheck": true,
+    "sourceMap": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  "files": ["src/types/passport-jwt.d.ts"]   // ⬅️ ajout important
 }
