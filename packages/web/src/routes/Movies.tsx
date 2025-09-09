@@ -1,5 +1,6 @@
 import React from 'react';
 import { api } from '../lib/api';
+import { Link } from 'react-router-dom';
 
 type Movie = { id: string | number; title: string; poster?: string | null; year?: number | null; plot?: string | null; };
 type Section = { key: string; title: string; items: Movie[] };
@@ -12,7 +13,6 @@ export default function Movies() {
   async function load() {
     setLoading(true); setErr('');
     try {
-      // ✅ utilise bien /sections (et non /rails)
       const res = await api('/vod/movies/sections');
       setSections(Array.isArray(res) ? res : []);
     } catch (e:any) {
@@ -45,19 +45,21 @@ export default function Movies() {
           <h3 style={{ margin:'6px 0 8px' }}>{sec.title}</h3>
           <div style={{ display:'flex', gap:12, overflowX:'auto', paddingBottom:4 }}>
             {sec.items.map(m => (
-              <article key={String(m.id)} style={{ minWidth:180, width:180, background:'#121212', border:'1px solid #222', borderRadius:12, overflow:'hidden' }}>
-                <div style={{ aspectRatio:'16 / 9', background:'#1a1a1a' }}>
-                  {m.poster ? (
-                    <img src={m.poster} alt={m.title} style={{ width:'100%', height:'100%', objectFit:'cover' }}/>
-                  ) : (
-                    <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100%',opacity:.6}}>Aucune image</div>
-                  )}
-                </div>
-                <div style={{ padding:8 }}>
-                  <div style={{ fontWeight:600, lineHeight:1.2 }}>{m.title}</div>
-                  {m.year ? <div style={{ opacity:.65, fontSize:12 }}>{m.year}</div> : null}
-                </div>
-              </article>
+              <Link to={`/movie/${encodeURIComponent(String(m.id))}`} key={String(m.id)} style={{ textDecoration:'none', color:'inherit' }}>
+                <article style={{ minWidth:180, width:180, background:'#121212', border:'1px solid #222', borderRadius:12, overflow:'hidden' }}>
+                  <div style={{ aspectRatio:'16 / 9', background:'#1a1a1a' }}>
+                    {m.poster ? (
+                      <img src={m.poster} alt={m.title} style={{ width:'100%', height:'100%', objectFit:'cover' }}/>
+                    ) : (
+                      <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100%',opacity:.6}}>Aucune image</div>
+                    )}
+                  </div>
+                  <div style={{ padding:8 }}>
+                    <div style={{ fontWeight:600, lineHeight:1.2 }}>{m.title}</div>
+                    {m.year ? <div style={{ opacity:.65, fontSize:12 }}>{m.year}</div> : null}
+                  </div>
+                </article>
+              </Link>
             ))}
           </div>
         </section>
