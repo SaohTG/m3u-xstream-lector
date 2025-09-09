@@ -1,43 +1,28 @@
-export const API_BASE =
-  (import.meta as any).env?.VITE_API_BASE ||
-  (typeof window !== 'undefined'
-    ? `http://${window.location.hostname}:3000`
-    : 'http://localhost:3000');
+const BASE: string = (import.meta as any).env?.VITE_API_BASE || '';
 
-export const getToken = () => localStorage.getItem('token');
-export const setToken = (t: string) => localStorage.setItem('token', t);
-export const clearToken = () => localStorage.removeItem('token');
+export function getToken(): string | null {
+  try { return localStorage.getItem('ns_token'); }
+  catch { return null; }
+}
 
-export async function api(path: string, opts: any = {}) {
-  const { method = 'GET', headers = {}, body } = opts;
+export async function api(path: string, opts: RequestInit = {}) {
   const token = getToken();
-
-  const res = await fetch(`${API_BASE}${path}`, {
-    method,
+  const url = `${BASE}${path}`;
+  const res = await fetch(url, {
+    ...opts,
     headers: {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...headers,
+      ...(opts.headers || {}),
     },
-    body: body ? JSON.stringify(body) : undefined,
+    mode: 'cors',
+    credentials: 'omit',
   });
-
-  if (res.status === 401) {
-    clearToken();
-    if (typeof window !== 'undefined') window.location.replace('/auth');
-    throw new Error('Session expirée ou manquante. Veuillez vous reconnecter.');
-  }
-
-  if (!res.ok) {
-    let msg = `HTTP ${res.status}`;
-    try {
-      const j = await res.json();
-      msg = j?.message || j?.error || msg;
-      if (Array.isArray(j?.message)) msg = j.message.join(', ');
-    } catch {}
-    throw new Error(msg);
-  }
-
   const ct = res.headers.get('content-type') || '';
-  return ct.includes('application/json') ? res.json() : {};
+  const body = ct.includes('application/json') ? await res.json().catch(() => ({})) : await res.text().catch(() => '');
+  if (!res.ok) {
+    const snippet = typeof body === 'string' ? body.slice(0, 200) : JSON.stringify(body).slice(0, 200);
+    throw new Error(`${res.status} ${res.statusText} – ${snippet}`);
+  }
+  return body;
 }
