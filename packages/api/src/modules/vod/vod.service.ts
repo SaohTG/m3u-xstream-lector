@@ -64,7 +64,7 @@ export class VodService {
     return res.data;
   }
 
-  // ---------- Helpers sections ----------
+  // ---------- Helpers ----------
   private yearFromTitle(title?: string | null): number | null {
     if (!title) return null;
     const m = title.match(/\b(19|20)\d{2}\b/);
@@ -100,6 +100,66 @@ export class VodService {
       .sort((a, b) => b[1].length - a[1].length)
       .slice(0, max)
       .map(([title, arr]) => ({ key: `grp:${title}`, title, items: arr.slice(0, 24) as T[] }));
+  }
+
+  // ----- Enrichissement VOD (Xtream: get_vod_info) -----
+  private async getVodInfo(base: string, username: string, password: string, vodId: string | number) {
+    const data = await this.xtreamGet(base, {
+      username, password, action: 'get_vod_info', vod_id: vodId,
+    });
+    // Les panels varient: info, movie_data, movie_info...
+    const info = data?.info || data?.movie_data || data?.movie_info || {};
+    return {
+      poster: info.movie_image || info.cover || info.backdrop_path || null,
+      plot: info.plot || info.description || info.overview || null,
+      rating: info.rating || info.vote_average || null,
+      duration: info.duration || info.runtime || null,
+      year:
+        (info.releasedate && Number(String(info.releasedate).slice(0, 4))) ||
+        (info.year && Number(info.year)) ||
+        null,
+      title: info.name || info.title || null,
+    };
+  }
+
+  private async enrichMoviesXtream(
+    base: string,
+    username: string,
+    password: string,
+    items: Movie[],
+    maxItems = 120,
+    concurrency = 8,
+  ): Promise<Record<string | number, Partial<Movie>>> {
+    const ids = Array.from(
+      new Set(items.map(m => m.id).filter(Boolean))
+    ).slice(0, maxItems);
+
+    const results: Record<string | number, Partial<Movie>> = {};
+    let idx = 0;
+
+    const worker = async () => {
+      while (idx < ids.length) {
+        const my = idx++;
+        const id = ids[my]!;
+        try {
+          const inf = await this.getVodInfo(base, username, password, id);
+          results[id] = {
+            poster: inf.poster ?? undefined,
+            plot: inf.plot ?? undefined,
+            rating: inf.rating ?? undefined,
+            duration: inf.duration ?? undefined,
+            year: inf.year ?? undefined,
+            title: inf.title ?? undefined,
+          };
+        } catch (e) {
+          // on continue
+        }
+      }
+    };
+
+    const workers = Array.from({ length: Math.min(concurrency, ids.length) }, () => worker());
+    await Promise.all(workers);
+    return results;
   }
 
   // ---------- Public lists ----------
@@ -148,6 +208,7 @@ export class VodService {
       }));
     }
 
+    // M3U
     if (!pl.url) throw new BadRequestException('Playlist M3U sans URL.');
     const resp = await axios.get(pl.url, {
       timeout: 60000,
@@ -214,6 +275,7 @@ export class VodService {
       }));
     }
 
+    // M3U
     if (!pl.url) throw new BadRequestException('Playlist M3U sans URL.');
     const resp = await axios.get(pl.url, {
       timeout: 60000,
@@ -243,11 +305,14 @@ export class VodService {
 
     const out: Section<Movie>[] = [];
 
+    // Sections de base
     if (pl.type === 'XTREAM') {
+      // Récemment ajoutés
       const recent = movies.filter(m => typeof m.added === 'number')
         .sort((a, b) => (b.added! - a.added!)).slice(0, 30);
       if (recent.length) out.push({ key: 'recent', title: 'Récemment ajoutés', items: recent });
 
+      // Catégories
       let catsMap: Record<string, string> = {};
       try {
         const cats = await this.xtreamGet(pl.base_url!, { username: pl.username!, password: pl.password!, action: 'get_vod_categories' });
@@ -259,14 +324,40 @@ export class VodService {
       } catch {}
       out.push(...this.byGroup(movies, catsMap, 8));
     } else {
+      // M3U
       if (movies.length) out.push({ key: 'recent', title: 'Récemment ajoutés', items: movies.slice(0, 30) });
       out.push(...this.byGroup(movies, undefined, 8));
     }
 
+    // Années
     const years = this.topYears(movies, 3);
     for (const y of years) {
       const arr = movies.filter(m => (m.year ?? this.yearFromTitle(m.title)) === y).slice(0, 24);
       if (arr.length) out.push({ key: `year:${y}`, title: `Films ${y}`, items: arr });
+    }
+
+    // ----- ENRICHISSEMENT ciblé pour Xtream (get_vod_info) -----
+    if (pl.type === 'XTREAM' && pl.base_url && pl.username && pl.password) {
+      // On enrichit uniquement les films présents dans les rails (limite globale 120)
+      const allItems = out.flatMap(s => s.items);
+      const details = await this.enrichMoviesXtream(pl.base_url, pl.username, pl.password, allItems, 120, 8);
+
+      // Patch des items
+      for (const sec of out) {
+        sec.items = sec.items.map(m => {
+          const d = details[m.id];
+          if (!d) return m;
+          return {
+            ...m,
+            title: d.title ?? m.title,
+            poster: d.poster ?? m.poster,
+            plot: d.plot ?? m.plot,
+            rating: d.rating ?? m.rating,
+            duration: d.duration ?? m.duration,
+            year: d.year ?? m.year,
+          };
+        });
+      }
     }
 
     return out;
@@ -279,7 +370,7 @@ export class VodService {
 
     const out: Section<Show>[] = [];
 
-    // Récents par 'added' si dispo
+    // Récents
     const recent = shows
       .filter(s => typeof s.added === 'number')
       .sort((a, b) => (b.added! - a.added!))
