@@ -1,18 +1,79 @@
 version: "3.9"
+
 services:
   postgres:
-    image: postgres:16
+    image: postgres:15-alpine
+    container_name: iptv-saas-postgres
     environment:
+      POSTGRES_DB: novastream
       POSTGRES_USER: novastream
       POSTGRES_PASSWORD: novastream
-      POSTGRES_DB: novastream
-    ports: ["5432:5432"]
-    volumes: [pg:/var/lib/postgresql/data]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
 
-  redis:
-    image: redis:7
-    ports: ["6379:6379"]
+  api:
+    build:
+      context: ./packages/api
+    container_name: iptv-saas-api
+    environment:
+      # DB
+      DATABASE_URL: postgres://novastream:novastream@postgres:5432/novastream
+      # API
+      API_PORT: "3000"
+      JWT_SECRET: "change_me_super_secret"
+      NODE_ENV: "development"  # installe aussi les devDeps dans l'image si nécessaire
+      # S3/MinIO
+      S3_ENDPOINT: "http://minio:9000"
+      S3_BUCKET: "novastream"
+      S3_ACCESS_KEY: "admin"
+      S3_SECRET_KEY: "changeme123"
+    depends_on:
+      - postgres
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
 
+  web:
+    build:
+      context: ./packages/web
+    container_name: iptv-saas-web
+    environment:
+      # ⚠️ Mets ici ton IP/domaine public de l’API
+      VITE_API_BASE: "http://85.31.239.110:3000"
+    depends_on:
+      - api
+    ports:
+      - "5173:5173"
+    restart: unless-stopped
+
+  # Mock Xtream sans fichier (script inline)
+  xtream-mock:
+    image: node:20-alpine
+    container_name: iptv-saas-xtream-mock
+    command: >
+      node -e "const http=require('http'),{URL}=require('url');
+      function J(r,c,o){o=JSON.stringify(o);r.writeHead(c,{'Content-Type':'application/json','Access-Control-Allow-Origin':'*'});r.end(o);}
+      http.createServer((q,s)=>{
+        try{
+          const u=new URL(q.url,'http://'+q.headers.host);
+          if(u.pathname!='/player_api.php')return J(s,404,{error:'not found'});
+          const user=u.searchParams.get('username')||'',pass=u.searchParams.get('password')||'',action=u.searchParams.get('action')||'';
+          const ok=(user==='u'&&pass==='p');
+          if(!ok)return J(s,200,{user_info:{auth:0,status:'Expired'},server_info:{url:q.headers.host}});
+          if(action==='get_live_streams')return J(s,200,[{name:'News HD',stream_id:1,stream_type:'live',category_id:1,stream_icon:''},{name:'Sport 1',stream_id:2,stream_type:'live',category_id:2,stream_icon:''}]);
+          if(action==='get_vod_streams')return J(s,200,[{name:'Mock Movie',stream_id:100,stream_icon:'',year:2020,rating:8.2,category_id:10,plot:'Demo movie'}]);
+          if(action==='get_series')return J(s,200,[{name:'Mock Show',series_id:200,cover:'',plot:'Demo series',rating:7.7,category_id:20}]);
+          return J(s,200,{user_info:{auth:1,status:'Active'},server_info:{url:q.headers.host}});
+        }catch(e){return J(s,500,{error:String(e.message||e)})}
+      }).listen(8888,'0.0.0.0',()=>console.log('xtream-mock on 8888'));"
+    ports:
+      - "8888:8888"
+    restart: unless-stopped
+
+  # MinIO (image officielle) — plus simple côté permissions
   minio:
     image: minio/minio:latest
     container_name: iptv-saas-minio
@@ -21,41 +82,12 @@ services:
       - MINIO_ROOT_USER=admin
       - MINIO_ROOT_PASSWORD=changeme123
     volumes:
-      - minio_data:/data        # <- nouveau chemin
+      - minio_data:/data
     ports:
-      - "9000:9000"             # API S3
-      - "9001:9001"             # Console
+      - "9000:9000"  # API S3
+      - "9001:9001"  # Console web
     restart: unless-stopped
 
-
-  xtream-mock:
-    build: ./services/xtream-mock
-    ports: ["8888:8888"]
-
-  api:
-    build: ./packages/api
-    depends_on: [postgres, redis, xtream-mock]
-    ports: ["3000:3000"]
-    environment:
-      API_PORT: "3000"
-      JWT_SECRET: "dev_jwt_secret"
-      JWT_REFRESH_SECRET: "dev_refresh_secret"
-      DATABASE_URL: "postgresql://novastream:novastream@postgres:5432/novastream"
-      REDIS_URL: "redis://redis:6379"
-      S3_ENDPOINT: "http://minio:9000"
-      S3_ACCESS_KEY: "minio"
-      S3_SECRET_KEY: "minio123"
-      S3_BUCKET: "novastream"
-      TMDB_API_KEY: "CHANGE_ME"
-      XTREAM_BASE_URL: "http://xtream-mock:8888"
-
-  web:
-    build: ./packages/web
-    depends_on: [api]
-    ports: ["5173:5173"]
-    environment:
-      VITE_API_BASE: "http://85.31.239.110:3000"   # <- remplace localhost
-
-
 volumes:
-  pg:
+  postgres_data:
+  minio_data:
