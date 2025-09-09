@@ -11,6 +11,7 @@ export const clearToken = () => localStorage.removeItem('token');
 export async function api(path: string, opts: any = {}) {
   const { method = 'GET', headers = {}, body } = opts;
   const token = getToken();
+
   const res = await fetch(`${API_BASE}${path}`, {
     method,
     headers: {
@@ -21,6 +22,12 @@ export async function api(path: string, opts: any = {}) {
     body: body ? JSON.stringify(body) : undefined,
   });
 
+  if (res.status === 401) {
+    clearToken();
+    if (typeof window !== 'undefined') window.location.replace('/auth');
+    throw new Error('Session expirée ou manquante. Veuillez vous reconnecter.');
+  }
+
   if (!res.ok) {
     let msg = `HTTP ${res.status}`;
     try {
@@ -30,6 +37,7 @@ export async function api(path: string, opts: any = {}) {
     } catch {}
     throw new Error(msg);
   }
+
   const ct = res.headers.get('content-type') || '';
   return ct.includes('application/json') ? res.json() : {};
 }
