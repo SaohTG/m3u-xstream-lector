@@ -18,19 +18,12 @@ export default function Auth() {
       const path = mode === 'login' ? '/auth/login' : '/auth/signup';
       const res = await api(path, { method: 'POST', body: { email, password } });
 
-      // Accepte plusieurs formats possibles depuis l'API
-      const token =
-        res?.accessToken ??
-        res?.access_token ??
-        res?.token ??
-        null;
-
-      if (!token) {
-        throw new Error('Token manquant dans la réponse API');
-      }
+      const token = res?.accessToken ?? res?.access_token ?? res?.token ?? null;
+      if (!token) throw new Error('Token manquant dans la réponse API');
 
       setToken(token);
-      nav('/onboarding', { replace: true });
+      // On envoie l’utilisateur directement vers /movies
+      nav('/movies', { replace: true });
     } catch (e: any) {
       setErr(e?.message || 'Erreur');
     } finally {

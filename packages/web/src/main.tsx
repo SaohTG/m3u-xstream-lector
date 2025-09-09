@@ -9,6 +9,7 @@ import Onboarding from './routes/Onboarding';
 import Auth from './routes/Auth';
 import MovieDetails from './routes/MovieDetails';
 import AppErrorBoundary from './AppErrorBoundary';
+import RequirePlaylist from './guards/RequirePlaylist';
 
 function Protected({ children }: { children?: React.ReactNode }) {
   const t = getToken();
@@ -31,17 +32,6 @@ function Shell() {
       <main style={{ padding: 16 }}>
         <Outlet />
       </main>
-      <DebugBar />
-    </div>
-  );
-}
-
-function DebugBar() {
-  const token = !!getToken();
-  const apiBase = (import.meta as any).env?.VITE_API_BASE || '';
-  return (
-    <div style={{ position:'fixed', left:8, bottom:8, fontSize:12, opacity:0.8, background:'#111', border:'1px solid #333', borderRadius:8, padding:'6px 8px' }}>
-      API: {apiBase || '(par défaut)'} · Token: {token ? '✅' : '❌'}
     </div>
   );
 }
@@ -52,25 +42,26 @@ const router = createBrowserRouter([
   {
     element: <Shell />,
     children: [
+      // Onboarding accessible même sans playlist
       { path: '/onboarding', element: <Protected><Onboarding /></Protected> },
-      { path: '/movies', element: <Protected><Movies /></Protected> },
-      { path: '/shows',  element: <Protected><Shows /></Protected> },
-      { path: '/live',   element: <Protected><Live /></Protected> },
-      { path: '/movie/:id', element: <Protected><MovieDetails /></Protected> },
+
+      // Pages qui EXIGENT une playlist liée
+      { path: '/movies', element: <Protected><RequirePlaylist><Movies /></RequirePlaylist></Protected> },
+      { path: '/shows',  element: <Protected><RequirePlaylist><Shows /></RequirePlaylist></Protected> },
+      { path: '/live',   element: <Protected><RequirePlaylist><Live /></RequirePlaylist></Protected> },
+
+      // Détail film
+      { path: '/movie/:id', element: <Protected><RequirePlaylist><MovieDetails /></RequirePlaylist></Protected> },
     ]
   },
 ]);
 
-// Log des erreurs async pour debug (aide en cas d'écran blanc)
 window.addEventListener('unhandledrejection', (e) => {
   console.error('Unhandled promise rejection:', e.reason);
 });
 
-function App() {
-  return <RouterProvider router={router} />;
-}
+function App() { return <RouterProvider router={router} />; }
 
-// ✅ Monte l’app dans #root
 const rootEl = document.getElementById('root');
 if (!rootEl) {
   console.error('Élément #root introuvable dans index.html');

@@ -10,11 +10,18 @@ export default function Onboarding() {
   const [pass, setPass] = React.useState('');
   const [loading, setLoading] = React.useState(false);
   const [err, setErr] = React.useState('');
+  const [already, setAlready] = React.useState(false);
   const nav = useNavigate();
 
   React.useEffect(() => {
     const t = getToken();
-    if (!t) nav('/auth', { replace: true });
+    if (!t) { nav('/auth', { replace: true }); return; }
+    (async () => {
+      try {
+        const res = await api('/playlists/me');
+        if (res && res.type) setAlready(true);
+      } catch {}
+    })();
   }, [nav]);
 
   async function link() {
@@ -26,23 +33,15 @@ export default function Onboarding() {
 
       const res = await api('/playlists/link', { method: 'POST', body });
 
-      // certains back renvoient un token rafraîchi après link : on l'accepte si présent
-      const token =
-        res?.accessToken ??
-        res?.access_token ??
-        res?.token ??
-        null;
+      // Certains back renvoient un token après link
+      const token = res?.accessToken ?? res?.access_token ?? res?.token ?? null;
       if (token) setToken(token);
 
       nav('/movies', { replace: true });
     } catch (e: any) {
-      // Astuce UX: si 401, proposer de se reconnecter
       const msg = String(e.message || '');
-      if (msg.startsWith('401')) {
-        setErr("Session expirée ou non authentifiée. Merci de vous reconnecter.");
-      } else {
-        setErr(msg);
-      }
+      if (msg.startsWith('401')) setErr('Session expirée. Merci de vous reconnecter.');
+      else setErr(msg);
     } finally {
       setLoading(false);
     }
@@ -51,6 +50,13 @@ export default function Onboarding() {
   return (
     <div style={{ display:'grid', gap:16 }}>
       <h2>Onboarding</h2>
+
+      {already && (
+        <div style={{ padding:12, border:'1px solid #2d2', borderRadius:8, background:'#112' }}>
+          Une source est <b>déjà liée</b> à ce compte. Vous pouvez <button onClick={()=>nav('/movies')} style={{ marginLeft:6 }}>continuer</button> ou en lier une nouvelle ci-dessous (l’ancienne sera désactivée).
+        </div>
+      )}
+
       <div style={{ display:'flex', gap:8 }}>
         <button onClick={() => setMode('m3u')}   style={{ padding:'8px 12px', borderRadius:8, border:'1px solid #333', background: mode==='m3u' ? '#fff' : 'transparent', color: mode==='m3u' ? '#000' : '#fff' }}>Playlist M3U</button>
         <button onClick={() => setMode('xtream')}style={{ padding:'8px 12px', borderRadius:8, border:'1px solid #333', background: mode==='xtream' ? '#fff' : 'transparent', color: mode==='xtream' ? '#000' : '#fff' }}>Compte Xtream</button>
@@ -83,9 +89,9 @@ export default function Onboarding() {
                 style={{ padding:'10px 12px', borderRadius:8, border:'1px solid #333', background:'#fff', color:'#000', fontWeight:700 }}>
           {loading ? '...' : 'Lier la source'}
         </button>
-        <button onClick={() => { setToken(null); window.location.href = '/auth'; }}
+        <button onClick={() => { window.location.href = '/movies'; }}
                 style={{ padding:'10px 12px', borderRadius:8, border:'1px solid #333', background:'transparent', color:'#fff' }}>
-          Se reconnecter
+          Continuer sans changer
         </button>
       </div>
     </div>
