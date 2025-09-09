@@ -1,25 +1,31 @@
 import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
 import axios from 'axios';
-import { LinkPlaylistDto } from './dto/link-playlist.dto';
 import * as https from 'https';
+import { LinkPlaylistDto } from './dto/link-playlist.dto';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Playlist } from './playlist.entity';
 
 @Injectable()
 export class PlaylistsService {
-  async link(dto: LinkPlaylistDto) {
+  constructor(@InjectRepository(Playlist) private repo: Repository<Playlist>) {}
+
+  /**
+   * Valide la source (M3U ou Xtream) ET enregistre la playlist comme "active" pour l'utilisateur.
+   */
+  async link(dto: LinkPlaylistDto, userId: string) {
+    if (!userId) throw new UnauthorizedException('Utilisateur non authentifié');
+
     if (dto.type === 'M3U') {
       if (!dto.url) throw new BadRequestException('URL M3U manquante');
 
-      // Lecture en streaming des premiers ~4Ko pour valider le header #EXTM3U
       try {
         const res = await axios.get(dto.url, {
           timeout: 8000,
           responseType: 'stream',
           maxRedirects: 5,
           validateStatus: (s) => s >= 200 && s < 400,
-          headers: {
-            'User-Agent': 'NovaStream/1.0 (+https://example.com)',
-            Accept: '*/*',
-          },
+          headers: { 'User-Agent': 'NovaStream/1.0', Accept: '*/*' },
           httpsAgent: new https.Agent({ rejectUnauthorized: true }),
         });
 
@@ -28,7 +34,7 @@ export class PlaylistsService {
           res.data.on('data', (chunk: Buffer) => {
             headBuf = Buffer.concat([headBuf, chunk]);
             if (headBuf.length >= 4096) {
-              res.data.destroy(); // stoppe rapidement le stream
+              res.data.destroy();
               resolve();
             }
           });
@@ -39,8 +45,8 @@ export class PlaylistsService {
         const headStr = headBuf
           .slice(0, 4096)
           .toString('utf8')
-          .replace(/^\uFEFF/, '') // retire BOM UTF-8
-          .replace(/^\s+/, ''); // retire espaces éventuels en tête
+          .replace(/^\uFEFF/, '')
+          .replace(/^\s+/, '');
 
         if (!/^#EXTM3U/i.test(headStr)) {
           throw new BadRequestException('Fichier M3U invalide : en-tête #EXTM3U absent.');
@@ -72,7 +78,6 @@ export class PlaylistsService {
           headers: { 'User-Agent': 'NovaStream/1.0', Accept: 'application/json' },
         });
 
-        // Refuser tout ce qui n'est pas un JSON exploitable
         if (typeof res.data !== 'object' || res.data === null) {
           throw new UnauthorizedException('Réponse non JSON — URL Xtream invalide.');
         }
@@ -82,7 +87,7 @@ export class PlaylistsService {
 
         const auth = Number(ui.auth) === 1;
         const statusStr = String(ui.status ?? '').toLowerCase();
-        const active = statusStr.includes('active'); // gère Active/ACTIVE
+        const active = statusStr.includes('active');
 
         if (!auth || !active) {
           throw new UnauthorizedException('Identifiants Xtream invalides ou compte inactif.');
@@ -95,8 +100,27 @@ export class PlaylistsService {
       }
     }
 
-    // Validation OK -> on renvoie un drapeau explicite
-    const playlistId = 'pl_' + Math.random().toString(36).slice(2, 8);
-    return { validated: true, playlistId, status: 'PENDING' };
+    // Persist "active" playlist (dernière en date)
+    const pl = this.repo.create({
+      user_id: userId,
+      type: dto.type,
+      url: dto.type === 'M3U' ? dto.url! : null,
+      base_url: dto.type === 'XTREAM' ? (dto.baseUrl || '').replace(/\/+$/, '') : null,
+      username: dto.type === 'XTREAM' ? dto.username! : null,
+      password: dto.type === 'XTREAM' ? dto.password! : null,
+    });
+    const saved = await this.repo.save(pl);
+
+    return { validated: true, playlistId: saved.id, status: 'PENDING' };
+  }
+
+  /**
+   * Retourne la playlist la plus récente (active) pour l’utilisateur.
+   */
+  async getActiveForUser(userId: string): Promise<Playlist | null> {
+    return this.repo.findOne({
+      where: { user_id: userId },
+      order: { created_at: 'DESC' },
+    });
   }
 }
