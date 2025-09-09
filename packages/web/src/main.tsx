@@ -1,47 +1,65 @@
-import React, { Component, ReactNode } from 'react';
-import { createRoot } from 'react-dom/client';
-import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom';
-import App from './routes/App';
-import Auth from './routes/Auth';
-import Onboarding from './routes/Onboarding';
+import React from 'react';
+import { Navigate, Outlet, RouterProvider, createBrowserRouter, Link } from 'react-router-dom';
+import { getToken } from './lib/api';
 import Movies from './routes/Movies';
 import Shows from './routes/Shows';
 import Live from './routes/Live';
-import MyList from './routes/MyList';
-import { getToken } from './lib/api';
+import Onboarding from './routes/Onboarding';
+import Auth from './routes/Auth';
+import MovieDetails from './routes/MovieDetails';
 
-class ErrorBoundary extends Component<{children:ReactNode}, {err?:any}> {
-  constructor(props:any){ super(props); this.state = {}; }
-  static getDerivedStateFromError(err:any){ return { err }; }
-  componentDidCatch(err:any){ console.error('UI error:', err); }
-  render(){
-    if(this.state.err){
-      return <pre style={{whiteSpace:'pre-wrap', padding:16, color:'#b00', background:'#200'}}>
-        Une erreur est survenue côté UI : {String(this.state.err?.message||this.state.err)}
-      </pre>;
-    }
-    return this.props.children;
-  }
+function Protected({ children }: { children?: React.ReactNode }) {
+  const t = getToken();
+  if (!t) return <Navigate to="/auth" replace />;
+  return <>{children ?? <Outlet />}</>;
 }
 
-const Protected = ({ children }: { children: JSX.Element }) =>
-  getToken() ? children : <Navigate to="/auth" replace />;
+function Shell() {
+  return (
+    <div style={{ minHeight: '100dvh', background: '#0b0b0b', color: '#fff' }}>
+      <header style={{ display:'flex', alignItems:'center', gap:16, padding:'12px 16px', borderBottom:'1px solid #222' }}>
+        <div style={{ fontWeight:800 }}>NovaStream</div>
+        <nav style={{ display:'flex', gap:12, fontSize:14 }}>
+          <Link to="/movies">Films</Link>
+          <Link to="/shows">Séries</Link>
+          <Link to="/live">TV</Link>
+          <Link to="/onboarding">Onboarding</Link>
+        </nav>
+      </header>
+      <main style={{ padding: 16 }}>
+        <Outlet />
+      </main>
+      <DebugBar />
+    </div>
+  );
+}
+
+function DebugBar() {
+  const token = !!getToken();
+  const apiBase = (import.meta as any).env?.VITE_API_BASE || '';
+  return (
+    <div style={{ position:'fixed', left:8, bottom:8, fontSize:12, opacity:0.8, background:'#111', border:'1px solid #333', borderRadius:8, padding:'6px 8px' }}>
+      API: {apiBase || '(par défaut)'} · Token: {token ? '✅' : '❌'}
+    </div>
+  );
+}
 
 const router = createBrowserRouter([
-  { path: '/', element: <Navigate to={getToken() ? '/onboarding' : '/auth'} replace /> },
+  { path: '/', element: <Navigate to="/movies" replace /> },
   { path: '/auth', element: <Auth /> },
-  { path: '/onboarding', element: <Protected><Onboarding /></Protected> },
   {
-    path: '/',
-    element: <Protected><App /></Protected>,
+    element: <Shell />,
     children: [
-      { path: 'movies', element: <Movies /> },
-      { path: 'shows', element: <Shows /> },
-      { path: 'live', element: <Live /> },
-      { path: 'list', element: <MyList /> },
-    ],
+      { path: '/onboarding', element: <Protected><Onboarding /></Protected> },
+      { path: '/movies', element: <Protected><Movies /></Protected> },
+      { path: '/shows',  element: <Protected><Shows /></Protected> },
+      { path: '/live',   element: <Protected><Live /></Protected> },
+      // ✅ nouvelle route
+      { path: '/movie/:id', element: <Protected><MovieDetails /></Protected> },
+    ]
   },
 ]);
 
-createRoot(document.getElementById('root')!)
-  .render(<ErrorBoundary><RouterProvider router={router} /></ErrorBoundary>);
+export default function App() {
+  return <RouterProvider router={router} />;
+}
