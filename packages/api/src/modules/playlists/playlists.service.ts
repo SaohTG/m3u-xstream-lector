@@ -12,12 +12,14 @@ export class PlaylistsService {
     private readonly repo: Repository<Playlist>,
   ) {}
 
-  /** Sélection “active” côté app : on privilégie active/enabled s’ils existent, sinon la plus récente. */
+  /** Sélection “active” côté app : on privilégie active/enabled/is_active s’ils existent, sinon la plus récente. */
   private pickActive(playlists: Playlist[]): Playlist | null {
     if (!playlists?.length) return null;
-    // si l’entité expose (au runtime) active/enabled/is_active => on le privilégie
     const withFlag = playlists.find(
-      (p) => (p as any).active === true || (p as any).enabled === true || (p as any).is_active === true,
+      (p) =>
+        (p as any).active === true ||
+        (p as any).enabled === true ||
+        (p as any).is_active === true,
     );
     return withFlag || playlists[0];
   }
@@ -25,8 +27,11 @@ export class PlaylistsService {
   /** Playlist “active” pour un utilisateur (sans présumer des colonnes). */
   async getActiveForUser(userId: string): Promise<Playlist | null> {
     const items = await this.repo.find({
-      where: { user_id: userId as any }, // user_id existe dans ton modèle
-      order: { updated_at: 'DESC' as any, created_at: 'DESC' as any, id: 'DESC' as any },
+      // @ts-expect-error: user_id est bien une colonne de notre entité
+      where: { user_id: userId },
+      // on ordonne pour récupérer la plus récente si plusieurs
+      // @ts-expect-error: champs horodatage présents dans l’entité
+      order: { updated_at: 'DESC', created_at: 'DESC', id: 'DESC' },
       take: 50,
     });
     return this.pickActive(items);
@@ -35,7 +40,8 @@ export class PlaylistsService {
   /** Playlist “active” globale s’il n’y a pas d’utilisateur fourni. */
   private async getLatestActive(): Promise<Playlist | null> {
     const items = await this.repo.find({
-      order: { updated_at: 'DESC' as any, created_at: 'DESC' as any, id: 'DESC' as any },
+      // @ts-expect-error: champs horodatage présents dans l’entité
+      order: { updated_at: 'DESC', created_at: 'DESC', id: 'DESC' },
       take: 50,
     });
     return this.pickActive(items);
@@ -52,14 +58,19 @@ export class PlaylistsService {
   private tryDecodeUrlId(id: string): string | null {
     if (!id) return null;
     if (/^https?:\/\//i.test(id)) return id;
+
+    // base64 -> URL ?
     try {
       const b = Buffer.from(id, 'base64').toString('utf8');
       if (/^https?:\/\//i.test(b)) return b;
     } catch {}
+
+    // decodeURIComponent -> URL ?
     try {
       const d = decodeURIComponent(id);
       if (/^https?:\/\//i.test(d)) return d;
     } catch {}
+
     return null;
   }
 
@@ -72,6 +83,7 @@ export class PlaylistsService {
   private extractSourceInfo(pl: Playlist): { type: PlaylistType; base?: string; user?: string; pass?: string } {
     const anyPl = pl as any;
     const type = String(anyPl.type || '').toUpperCase() as PlaylistType;
+
     // champs possibles suivant tes versions: url/base_url/host/port/username/user/password/pass
     let base: string | undefined =
       anyPl.url || anyPl.base_url || anyPl.baseUrl || anyPl.host || undefined;
@@ -85,7 +97,12 @@ export class PlaylistsService {
     const user = anyPl.username || anyPl.user;
     const pass = anyPl.password || anyPl.pass;
 
-    return { type: (type === 'XTREAM' || type === 'M3U') ? type : 'XTREAM', base: this.sanitizeBase(base), user, pass };
+    return {
+      type: (type === 'XTREAM' || type === 'M3U') ? type : 'XTREAM',
+      base: this.sanitizeBase(base),
+      user,
+      pass,
+    };
   }
 
   /** ---------- MÉTHODES UTILISÉES PAR VodService ---------- */
@@ -107,6 +124,7 @@ export class PlaylistsService {
     // M3U
     const fromIndex = await this.findM3UItemUrl(playlist.id, movieId);
     if (fromIndex) return fromIndex;
+
     const decoded = this.tryDecodeUrlId(movieId);
     if (decoded) return decoded;
 
@@ -129,10 +147,12 @@ export class PlaylistsService {
     // M3U
     const fromIndex = await this.findM3UItemUrl(playlist.id, episodeId);
     if (fromIndex) return fromIndex;
+
     const decoded = this.tryDecodeUrlId(episodeId);
     if (decoded) return decoded;
 
-    throw new NotFoundException 'URL d’épisode introuvable');
+    // ✅ correction: parenthèses manquantes précédemment
+    throw new NotFoundException('URL d’épisode introuvable');
   }
 
   /** (facultatif) Live si nécessaire ailleurs */
@@ -151,6 +171,7 @@ export class PlaylistsService {
 
     const fromIndex = await this.findM3UItemUrl(playlist.id, streamId);
     if (fromIndex) return fromIndex;
+
     const decoded = this.tryDecodeUrlId(streamId);
     if (decoded) return decoded;
 
