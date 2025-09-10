@@ -31,6 +31,21 @@ export class VodController {
     }
   }
 
+  /** ----------- MOVIES (rails + details + HLS) ----------- */
+
+  // 👉 corrige ton 404
+  @Get('movies/rails')
+  async movieRails(@Req() req: any) {
+    const user = this.requireAuth(req);
+    return await this.vod.getMovieRails(user?.sub);
+  }
+
+  @Get('movies/:id/details')
+  async movieDetails(@Param('id') id: string, @Req() req: any) {
+    const user = this.requireAuth(req);
+    return await this.vod.getMovieDetails(id, user?.sub);
+  }
+
   @Get('movies/:id/hls')
   async movieHls(@Param('id') id: string, @Req() req: any, @Res() res: any) {
     this.requireAuth(req);
@@ -40,6 +55,8 @@ export class VodController {
     res.send(text);
   }
 
+  /** ----------- EPISODES HLS ----------- */
+
   @Get('episodes/:id/hls')
   async episodeHls(@Param('id') id: string, @Req() req: any, @Res() res: any) {
     this.requireAuth(req);
@@ -48,6 +65,8 @@ export class VodController {
     res.setHeader('Cache-Control', 'no-store');
     res.send(text);
   }
+
+  /** ----------- PROXY SEGMENTS ----------- */
 
   @Get('proxy/seg')
   async proxySeg(@Query('u') u: string, @Req() req: any, @Res() res: any) {
