@@ -1,4 +1,3 @@
-// packages/api/src/main.ts
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import helmet from 'helmet';
@@ -6,21 +5,28 @@ import cookieParser from 'cookie-parser';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
-    // ← ICI si tu veux filtrer les niveaux de logs Nest
-    logger: ['error', 'warn', 'log'],
-  });
-
-  app.enableCors({
-    origin: (origin, cb) => cb(null, true),
-    credentials: false,
-    methods: ['GET','HEAD','PUT','PATCH','POST','DELETE','OPTIONS'],
-    allowedHeaders: ['Content-Type','Authorization'],
+    logger: ['log','warn','error'],
   });
 
   app.use(helmet());
   app.use(cookieParser());
 
-  await app.listen(Number(process.env.PORT || 3000), '0.0.0.0');
-  console.log('API listening on', process.env.PORT || 3000);
+  const ORIGINS = (process.env.CORS_ORIGIN || 'http://85.31.239.110:5173')
+    .split(',')
+    .map(s => s.trim());
+
+  app.enableCors({
+    origin: (origin, cb) => {
+      if (!origin) return cb(null, true);               // Postman/cURL
+      if (ORIGINS.includes(origin)) return cb(null, true);
+      return cb(new Error(`CORS blocked: ${origin}`), false);
+    },
+    credentials: true,                                   // 👈 obligatoire si credentials côté front
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    allowedHeaders: 'Content-Type, Authorization',
+    exposedHeaders: 'Content-Length',
+  });
+
+  await app.listen(process.env.PORT || 3000, '0.0.0.0');
 }
 bootstrap();
