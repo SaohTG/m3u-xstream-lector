@@ -1,84 +1,91 @@
-import React from 'react';
-import { api } from '../lib/api';
+import React, { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import Hls from 'hls.js';
+import { api } from '../lib/api';
+import { attachProgressReporter } from '../lib/progress';
+
+type Movie = {
+  id: string;
+  title: string;
+  description?: string;
+  rating?: number | null;
+  poster?: string | null;
+  backdrop?: string | null;
+  year?: number | null;
+  genres?: string[];
+};
 
 export default function MovieDetails() {
-  const { id } = useParams<{ id: string }>();
-  const [details, setDetails] = React.useState<any>(null);
-  const [err, setErr] = React.useState('');
-  const [playing, setPlaying] = React.useState<{ url: string } | null>(null);
+  const { id = '' } = useParams();
+  const [data, setData] = useState<Movie | null>(null);
+  const [url, setUrl] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
-  React.useEffect(() => {
+  useEffect(() => {
     let mounted = true;
-    (async () => {
-      try {
-        const d = await api(`/vod/movies/${id}`); // alias vers details
-        if (!mounted) return;
-        setDetails(d);
-      } catch (e: any) {
-        setErr(e?.message || 'Erreur');
-      }
-    })();
+    const load = async () => {
+      const d = await api(`/vod/movies/${encodeURIComponent(id)}/details`);
+      if (!mounted) return;
+      setData(d);
+      const u = await api(`/vod/movies/${encodeURIComponent(id)}/url`);
+      if (!mounted) return;
+      setUrl(u.url);
+    };
+    load().catch(console.error);
     return () => { mounted = false; };
   }, [id]);
 
-  async function play() {
-    setErr('');
-    try {
-      const res = await api(`/vod/movies/${id}/url`);
-      setPlaying({ url: res.url });
-    } catch (e: any) {
-      setErr(e?.message || 'Impossible de lancer la lecture');
-    }
-  }
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !url) return;
+    let hls: Hls | null = null;
+    let cleanup: (() => void) | null = null;
 
-  if (err) return <div style={{ color:'#ff7b7b' }}>{err}</div>;
-  if (!details) return <div>Chargement…</div>;
+    const attachReporter = () => {
+      if (!cleanup) {
+        cleanup = attachProgressReporter(video, { kind: 'MOVIE', refId: id });
+      }
+    };
+
+    const onLoaded = () => attachReporter();
+
+    if (Hls.isSupported()) {
+      hls = new Hls({ enableWorker: true });
+      hls.attachMedia(video);
+      hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+        hls!.loadSource(url);
+      });
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = url;
+    } else {
+      // mp4 fallback éventuel
+      video.src = url;
+    }
+
+    if (video.readyState >= 1) attachReporter();
+    video.addEventListener('loadedmetadata', onLoaded);
+
+    return () => {
+      video.removeEventListener('loadedmetadata', onLoaded);
+      if (cleanup) cleanup();
+      if (hls) hls.destroy();
+    };
+  }, [id, url]);
+
+  if (!data) return <div style={{ padding: 16 }}>Chargement…</div>;
 
   return (
-    <div style={{ display:'grid', gap:16 }}>
-      <div style={{ display:'grid', gridTemplateColumns:'240px 1fr', gap:16 }}>
-        <div style={{ width:240, borderRadius:12, overflow:'hidden', border:'1px solid #222', background:'#111' }}>
-          <div style={{
-            aspectRatio:'2/3',
-            backgroundImage: details.poster ? `url(${details.poster})` : undefined,
-            backgroundSize:'cover', backgroundPosition:'center'
-          }} />
-        </div>
-        <div>
-          <h2 style={{ margin:'0 0 8px' }}>
-            {details.title}{details.year ? ` · ${details.year}` : ''}
-          </h2>
-          <div style={{ opacity:0.85, marginBottom:8 }}>
-            {details.rating ? `Note : ${details.rating}/10` : '—'}
-            {details.released ? ` · Sortie: ${details.released}` : ''}
-            {details.genres?.length ? ` · ${details.genres.join(' · ')}` : ''}
-          </div>
-          <p style={{ opacity:0.9 }}>{details.description || 'Aucune description'}</p>
-          <div style={{ display:'flex', gap:8, marginTop:12 }}>
-            <button onClick={play}
-                    style={{ padding:'10px 14px', borderRadius:8, border:'1px solid #333', background:'#fff', color:'#000', fontWeight:700 }}>
-              ▶ Lire le film
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {playing && (
-        <div style={{ border:'1px solid #222', borderRadius:12, overflow:'hidden', background:'#000' }}>
-          <div style={{ padding:'8px 12px', borderBottom:'1px solid #222', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-            <strong>Lecture</strong>
-            <button onClick={() => setPlaying(null)} style={{ padding:'6px 10px', borderRadius:8, border:'1px solid #333', background:'transparent', color:'#fff' }}>Fermer</button>
-          </div>
-          <video
-            controls
-            autoPlay
-            playsInline
-            style={{ width:'100%', height:'min(70vh, 720px)', background:'#000' }}
-            src={playing.url}
-          />
-        </div>
+    <div style={{ padding: 16, color: '#fff' }}>
+      <h1 style={{ marginBottom: 8 }}>{data.title} {data.year ? `(${data.year})` : ''}</h1>
+      {data.rating != null && <div style={{ opacity: 0.8 }}>Note: {data.rating}</div>}
+      {data.genres && data.genres.length > 0 && (
+        <div style={{ opacity: 0.8, marginTop: 4 }}>{data.genres.join(' • ')}</div>
       )}
+      {data.description && <p style={{ marginTop: 12, maxWidth: 800, lineHeight: 1.5 }}>{data.description}</p>}
+
+      <div style={{ marginTop: 20 }}>
+        <video ref={videoRef} controls playsInline style={{ width: '100%', maxWidth: 1000, background: '#000' }} />
+      </div>
     </div>
   );
 }
