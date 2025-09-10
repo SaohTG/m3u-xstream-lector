@@ -10,14 +10,13 @@ type RailItem = {
   category?: string | null;
   added_at?: number | null;
 };
-
 type Rail = { key: string; title: string; items: RailItem[] };
 
 @Injectable()
 export class VodService {
   constructor(private readonly playlists: PlaylistsService) {}
 
-  // ----------------- Rails (films/séries/live) -----------------
+  // ---------- RAILS FILMS ----------
   async getMovieRails(userId: string): Promise<Rail[]> {
     const pl = await this.playlists.getActiveForUser(userId);
     if (!pl) throw new BadRequestException('Aucune source liée');
@@ -29,26 +28,12 @@ export class VodService {
         this.xtGet(base, { action: 'get_vod_streams' }),
       ]);
 
-      const byCat: Record<string, RailItem[]> = {};
       const catNames: Record<string, string> = {};
       (cats || []).forEach((c: any) => (catNames[c.category_id] = c.category_name));
 
-      (list || []).forEach((m: any) => {
-        const it: RailItem = {
-          id: String(m.stream_id),
-          title: String(m.name || '').trim(),
-          poster: m.stream_icon || null,
-          year: m.year ? Number(m.year) : null,
-          category: catNames[m.category_id] || null,
-          added_at: m.added ? Number(m.added) : null,
-        };
-        const key = it.category || 'Divers';
-        byCat[key] = byCat[key] || [];
-        byCat[key].push(it);
-      });
-
-      // rails "Derniers ajouts" + par année (2025..2018) + par catégorie
       const rails: Rail[] = [];
+
+      // Récents
       const recents = [...(list || [])]
         .sort((a: any, b: any) => (b.added || 0) - (a.added || 0))
         .slice(0, 30)
@@ -62,6 +47,7 @@ export class VodService {
         }));
       rails.push({ key: 'recent', title: 'Récemment ajoutés', items: recents });
 
+      // Années récentes
       for (let y = new Date().getFullYear(); y >= 2018; y--) {
         const items = (list || [])
           .filter((m: any) => Number(m.year) === y)
@@ -77,14 +63,33 @@ export class VodService {
         if (items.length) rails.push({ key: `y-${y}`, title: `Films ${y}`, items });
       }
 
-      Object.keys(byCat).forEach((k) => rails.push({ key: `c-${k}`, title: k, items: byCat[k].slice(0, 30) }));
+      // Par catégories
+      const byCat: Record<string, RailItem[]> = {};
+      (list || []).forEach((m: any) => {
+        const it: RailItem = {
+          id: String(m.stream_id),
+          title: String(m.name || '').trim(),
+          poster: m.stream_icon || null,
+          year: m.year ? Number(m.year) : null,
+          category: catNames[m.category_id] || null,
+          added_at: m.added ? Number(m.added) : null,
+        };
+        const key = it.category || 'Divers';
+        byCat[key] = byCat[key] || [];
+        byCat[key].push(it);
+      });
+      Object.keys(byCat).forEach((k) =>
+        rails.push({ key: `c-${k}`, title: k, items: byCat[k].slice(0, 30) }),
+      );
+
       return rails;
     }
 
-    // M3U : à implémenter si tu as une structure VOD dans ta M3U
+    // M3U : non structuré pour VOD, pas de rails par défaut
     return [];
   }
 
+  // ---------- RAILS SÉRIES ----------
   async getShowRails(userId: string): Promise<Rail[]> {
     const pl = await this.playlists.getActiveForUser(userId);
     if (!pl) throw new BadRequestException('Aucune source liée');
@@ -98,21 +103,6 @@ export class VodService {
 
       const catNames: Record<string, string> = {};
       (cats || []).forEach((c: any) => (catNames[c.category_id] = c.category_name));
-
-      const byCat: Record<string, RailItem[]> = {};
-      (list || []).forEach((s: any) => {
-        const it: RailItem = {
-          id: String(s.series_id),
-          title: String(s.name || '').trim(),
-          poster: s.cover || null,
-          year: s.releaseDate ? Number(String(s.releaseDate).slice(0, 4)) : null,
-          category: catNames[s.category_id] || null,
-          added_at: s.added ? Number(s.added) : null,
-        };
-        const key = it.category || 'Divers';
-        byCat[key] = byCat[key] || [];
-        byCat[key].push(it);
-      });
 
       const rails: Rail[] = [];
       const recents = [...(list || [])]
@@ -128,13 +118,31 @@ export class VodService {
         }));
       rails.push({ key: 'recent', title: 'Nouveautés séries', items: recents });
 
-      Object.keys(byCat).forEach((k) => rails.push({ key: `c-${k}`, title: k, items: byCat[k].slice(0, 30) }));
+      const byCat: Record<string, RailItem[]> = {};
+      (list || []).forEach((s: any) => {
+        const it: RailItem = {
+          id: String(s.series_id),
+          title: String(s.name || '').trim(),
+          poster: s.cover || null,
+          year: s.releaseDate ? Number(String(s.releaseDate).slice(0, 4)) : null,
+          category: catNames[s.category_id] || null,
+          added_at: s.added ? Number(s.added) : null,
+        };
+        const key = it.category || 'Divers';
+        byCat[key] = byCat[key] || [];
+        byCat[key].push(it);
+      });
+      Object.keys(byCat).forEach((k) =>
+        rails.push({ key: `c-${k}`, title: k, items: byCat[k].slice(0, 30) }),
+      );
+
       return rails;
     }
 
     return [];
   }
 
+  // ---------- RAILS LIVE ----------
   async getLiveRails(userId: string): Promise<Rail[]> {
     const pl = await this.playlists.getActiveForUser(userId);
     if (!pl) throw new BadRequestException('Aucune source liée');
@@ -164,11 +172,56 @@ export class VodService {
     });
 
     const rails: Rail[] = [];
-    Object.keys(byCat).forEach((k) => rails.push({ key: `c-${k}`, title: k, items: byCat[k].slice(0, 30) }));
+    Object.keys(byCat).forEach((k) =>
+      rails.push({ key: `c-${k}`, title: k, items: byCat[k].slice(0, 30) }),
+    );
     return rails;
   }
 
-  // ----------------- Séries : détails / saisons / URL épisode -----------------
+  // ---------- DÉTAILS FILM ----------
+  async getMovieDetails(userId: string, movieId: string) {
+    const pl = await this.playlists.getActiveForUser(userId);
+    if (!pl) throw new BadRequestException('Aucune source liée');
+    if (pl.type !== 'XTREAM') {
+      throw new BadRequestException('Détail film disponible uniquement pour Xtream pour le moment.');
+    }
+    const base = this.xt(pl.base_url!, pl.username!, pl.password!);
+    const data = await this.xtGet(base, { action: 'get_vod_info', vod_id: movieId });
+    const info = data?.info || {};
+    return {
+      id: String(movieId),
+      title: String(info.name || info.title || '').trim(),
+      description: info.plot || '',
+      rating: typeof info.rating === 'number' ? info.rating : Number(info.rating || 0) || null,
+      poster: info.movie_image || info.cover || null,
+      backdrop: info.backdrop_path || null,
+      released: info.releasedate || null,
+      year: info.releasedate ? Number(String(info.releasedate).slice(0, 4)) : (info.year ? Number(info.year) : null),
+      genres: info.genre ? String(info.genre).split(',').map((s: string) => s.trim()).filter(Boolean) : [],
+      container_extension: info?.container_extension || null,
+    };
+  }
+
+  // ---------- URL STREAM FILM ----------
+  async getMovieStreamUrl(userId: string, movieId: string) {
+    const pl = await this.playlists.getActiveForUser(userId);
+    if (!pl) throw new BadRequestException('Aucune source liée');
+    if (pl.type !== 'XTREAM') {
+      throw new BadRequestException('Lecture films disponible uniquement pour Xtream pour le moment.');
+    }
+    const baseUrl = pl.base_url!.replace(/\/+$/, '');
+    // Essayer de récupérer l’extension exacte
+    let ext = 'mp4';
+    try {
+      const base = this.xt(pl.base_url!, pl.username!, pl.password!);
+      const data = await this.xtGet(base, { action: 'get_vod_info', vod_id: movieId });
+      ext = data?.info?.container_extension || 'mp4';
+    } catch {}
+    const url = `${baseUrl}/movie/${encodeURIComponent(pl.username!)}/${encodeURIComponent(pl.password!)}/${encodeURIComponent(movieId)}.${ext}`;
+    return { url };
+  }
+
+  // ---------- DÉTAILS SÉRIE / SAISONS / EP URL ----------
   async getSeriesDetails(userId: string, seriesId: string) {
     const pl = await this.playlists.getActiveForUser(userId);
     if (!pl) throw new BadRequestException('Aucune source liée');
@@ -222,28 +275,19 @@ export class VodService {
     if (pl.type !== 'XTREAM') {
       throw new BadRequestException('Lecture épisodes disponible uniquement pour Xtream pour le moment.');
     }
-    // on a besoin de l'extension : on la cherche via get_series_info de façon heuristique (quelques panels n’exposent pas d’endpoint direct)
-    const base = this.xt(pl.base_url!, pl.username!, pl.password!);
-    // Souvent inutile si tu stockes l’ext côté client, mais on sécurise:
-    let ext = 'mp4';
-    try {
-      // certains panels exposent action=get_series_info&series_id=... -> mais on n'a pas la série ici
-      // fallback : beaucoup d’épisodes sont lisibles sans ext strict (certains proposent m3u8)
-      ext = 'mp4';
-    } catch {}
-
-    const url = `${pl.base_url!.replace(/\/+$/, '')}/series/${encodeURIComponent(pl.username!)}/${encodeURIComponent(pl.password!)}/${encodeURIComponent(episodeId)}.${ext}`;
+    const baseUrl = pl.base_url!.replace(/\/+$/, '');
+    // Par défaut mp4 ; certains panels utilisent m3u8
+    const url = `${baseUrl}/series/${encodeURIComponent(pl.username!)}/${encodeURIComponent(pl.password!)}/${encodeURIComponent(episodeId)}.mp4`;
     return { url };
   }
 
-  // ----------------- Helpers Xtream -----------------
+  // ---------- Helpers Xtream ----------
   private xt(base: string, user: string, pass: string) {
     const u = new URL('/player_api.php', base);
     u.searchParams.set('username', user);
     u.searchParams.set('password', pass);
     return u;
   }
-
   private async xtGet(base: URL, params: Record<string, string | number>) {
     const u = new URL(base.toString());
     Object.entries(params).forEach(([k, v]) => u.searchParams.set(k, String(v)));
