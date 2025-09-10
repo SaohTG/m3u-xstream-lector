@@ -13,7 +13,7 @@ export function clearToken() {
 function computeDefaultBase(): string {
   try {
     const { protocol, hostname } = window.location;
-    return `${protocol}//${hostname}:3000`; // fallback auto -> :3000
+    return `${protocol}//${hostname}:3000`;
   } catch {
     return 'http://localhost:3000';
   }
@@ -21,6 +21,7 @@ function computeDefaultBase(): string {
 
 const ENV_BASE = ((import.meta as any).env?.VITE_API_BASE as string | undefined)?.replace(/\/+$/, '');
 const BASE: string = ENV_BASE || computeDefaultBase();
+export function getApiBase() { return BASE; } // 👈 helper exporté
 
 export class ApiError extends Error {
   status: number;
