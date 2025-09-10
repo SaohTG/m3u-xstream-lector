@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, InternalServerErrorException, BadRequestException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -12,6 +12,28 @@ export class AuthService {
     private readonly jwt: JwtService,
   ) {}
 
+  async signup(email: string, password: string): Promise<{ token: string }> {
+    if (!email || !password) throw new BadRequestException('Email/mot de passe requis');
+
+    const existing = await this.users.findOne({ where: { email: email.toLowerCase() as any } });
+    if (existing) throw new BadRequestException('Email déjà utilisé');
+
+    const hash = await bcrypt.hash(password, 10);
+    const user = this.users.create({
+      email: email.toLowerCase(),
+      password_hash: hash,
+      created_at: new Date(),
+    } as any);
+
+    await this.users.save(user);
+
+    const secret = process.env.JWT_SECRET;
+    if (!secret) throw new InternalServerErrorException('JWT_SECRET non configuré');
+
+    const token = await this.jwt.signAsync({ sub: user.id, email: user.email }, { secret, expiresIn: '7d' });
+    return { token };
+  }
+
   async login(email: string, password: string): Promise<{ token: string }> {
     if (!email || !password) {
       throw new UnauthorizedException('Email ou mot de passe manquant');
@@ -22,7 +44,6 @@ export class AuthService {
     });
 
     if (!user || !user.password_hash) {
-      // pas d’info sensible
       throw new UnauthorizedException('Identifiants invalides');
     }
 
@@ -33,7 +54,6 @@ export class AuthService {
 
     const secret = process.env.JWT_SECRET;
     if (!secret) {
-      // on remonte un 500 clair si la conf est incomplète
       throw new InternalServerErrorException('JWT_SECRET non configuré');
     }
 
