@@ -1,77 +1,43 @@
-const BASE: string = (import.meta as any).env?.VITE_API_BASE || '';
+const API_BASE = (import.meta as any).env?.VITE_API_BASE || '';
 
 export function getToken(): string | null {
-  try { return localStorage.getItem('ns_token'); }
-  catch { return null; }
+  try { return localStorage.getItem('ns_token'); } catch { return null; }
 }
 
-export function setToken(token: string | null) {
+export function setToken(t: string | null) {
   try {
-    if (token) localStorage.setItem('ns_token', token);
-    else localStorage.removeItem('ns_token');
-  } catch { /* ignore */ }
-}
-
-function isFormData(x: any): x is FormData {
-  return typeof FormData !== 'undefined' && x instanceof FormData;
-}
-function isBlob(x: any): x is Blob {
-  return typeof Blob !== 'undefined' && x instanceof Blob;
-}
-function isURLSearchParams(x: any): x is URLSearchParams {
-  return typeof URLSearchParams !== 'undefined' && x instanceof URLSearchParams;
-}
-function isArrayBuffer(x: any): x is ArrayBuffer {
-  return typeof ArrayBuffer !== 'undefined' && x instanceof ArrayBuffer;
+    if (!t) localStorage.removeItem('ns_token');
+    else localStorage.setItem('ns_token', t);
+  } catch {}
 }
 
 export async function api(path: string, opts: RequestInit = {}) {
   const token = getToken();
-  const url = `${BASE}${path}`;
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(opts.headers as any || {}),
+  };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  const headers = new Headers(opts.headers as any);
-
-  // Auth
-  if (token) headers.set('Authorization', `Bearer ${token}`);
-
-  // Corps de requête : auto-JSON stringify si c'est un objet JS
-  let body: any = opts.body as any;
-  const hasBody = body !== undefined && body !== null;
-
-  if (hasBody) {
-    const isString = typeof body === 'string';
-    const isStream = typeof ReadableStream !== 'undefined' && body instanceof ReadableStream;
-
-    if (!isString && !isFormData(body) && !isBlob(body) && !isURLSearchParams(body) && !isArrayBuffer(body) && !isStream) {
-      // Objet JS => JSON
-      if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-      body = JSON.stringify(body);
-    } else {
-      // Ne PAS forcer Content-Type pour FormData/Blob/URLSearchParams/ArrayBuffer
-      if (isURLSearchParams(body) && !headers.has('Content-Type')) {
-        headers.set('Content-Type', 'application/x-www-form-urlencoded;charset=UTF-8');
-      }
-    }
-  }
-
-  if (!headers.has('Accept')) headers.set('Accept', 'application/json');
-
-  const res = await fetch(url, {
+  const res = await fetch(API_BASE + path, {
     ...opts,
     headers,
-    body,
-    mode: 'cors',
+    // pas de cookies côté API (on est au Bearer)
     credentials: 'omit',
+    mode: 'cors',
   });
 
-  const ct = res.headers.get('content-type') || '';
-  const bodyOut = ct.includes('application/json')
-    ? await res.json().catch(() => ({}))
-    : await res.text().catch(() => '');
+  const text = await res.text();
+  let data: any = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = text; }
 
-  if (!res.ok) {
-    const snippet = typeof bodyOut === 'string' ? bodyOut.slice(0, 200) : JSON.stringify(bodyOut).slice(0, 200);
-    throw new Error(`${res.status} ${res.statusText} – ${snippet}`);
+  if (res.status === 401) {
+    // token expiré ou absent → on le purge pour forcer la reconnexion
+    setToken(null);
+    throw new Error(`401 Unauthorized – ${typeof data === 'string' ? data : JSON.stringify(data)}`);
   }
-  return bodyOut;
+  if (!res.ok) {
+    throw new Error(`${res.status} ${res.statusText} – ${typeof data === 'string' ? data : JSON.stringify(data)}`);
+  }
+  return data;
 }
