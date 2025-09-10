@@ -1,103 +1,52 @@
-import { Controller, Get, Param, Query, Req, Res, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard } from '../auth/jwt.guard';
+import {
+  Controller, Get, Param, Query, Res, Req, UnauthorizedException,
+} from '@nestjs/common';
+import { Response, Request } from 'express';
+import { JwtService } from '@nestjs/jwt';
 import { VodService } from './vod.service';
 
 @Controller('vod')
-@UseGuards(JwtAuthGuard)
 export class VodController {
-  constructor(private readonly vod: VodService) {}
+  constructor(
+    private readonly vod: VodService,
+    private readonly jwt: JwtService,
+  ) {}
 
-  // ========= FILMS =========
-  @Get('movies/rails')
-  moviesRails(@Req() req: any) {
-    return this.vod.getMovieRails(req.user.userId);
+  /** Vérifie JWT via header ou query ?t= */
+  private requireAuth(req: Request) {
+    let token = '';
+    const h = req.headers['authorization'];
+    if (h && typeof h === 'string' && h.toLowerCase().startsWith('bearer ')) token = h.slice(7);
+    if (!token && typeof req.query.t === 'string') token = req.query.t;
+    if (!token) throw new UnauthorizedException('Missing token');
+    try {
+      return this.jwt.verify(token, { secret: process.env.JWT_SECRET || 'changeme' });
+    } catch {
+      throw new UnauthorizedException('Invalid token');
+    }
   }
 
-  @Get('movies/sections')
-  moviesSections(@Req() req: any) {
-    return this.vod.getMovieRails(req.user.userId);
-  }
-
-  @Get('movies/:movieId')
-  movieDetailsAlias(@Req() req: any, @Param('movieId') movieId: string) {
-    return this.vod.getMovieDetails(req.user.userId, movieId);
-  }
-
-  @Get('movies/:movieId/details')
-  movieDetails(@Req() req: any, @Param('movieId') movieId: string) {
-    return this.vod.getMovieDetails(req.user.userId, movieId);
-  }
-
-  @Get('movies/:movieId/url')
-  movieUrl(@Req() req: any, @Param('movieId') movieId: string) {
-    return this.vod.getMovieStreamUrl(req.user.userId, movieId);
-  }
-
-  // ========= SÉRIES =========
-  @Get('shows/rails')
-  showsRails(@Req() req: any) {
-    return this.vod.getShowRails(req.user.userId);
-  }
-
-  @Get('shows/sections')
-  showsSections(@Req() req: any) {
-    return this.vod.getShowRails(req.user.userId);
-  }
-
-  @Get('shows/:seriesId/details')
-  showDetails(@Req() req: any, @Param('seriesId') seriesId: string) {
-    return this.vod.getSeriesDetails(req.user.userId, seriesId);
-  }
-
-  @Get('shows/:seriesId/seasons')
-  showSeasons(@Req() req: any, @Param('seriesId') seriesId: string) {
-    return this.vod.getSeriesSeasons(req.user.userId, seriesId);
-  }
-
-  @Get('episodes/:episodeId/url')
-  episodeUrl(@Req() req: any, @Param('episodeId') episodeId: string) {
-    return this.vod.getEpisodeStreamUrl(req.user.userId, episodeId);
-  }
-
-  // ========= TV =========
-  @Get('live/rails')
-  liveRails(@Req() req: any) {
-    return this.vod.getLiveRails(req.user.userId);
-  }
-
-  @Get('live/sections')
-  liveSections(@Req() req: any) {
-    return this.vod.getLiveRails(req.user.userId);
-  }
-
-  @Get('live/:streamId/url')
-  liveUrl(@Req() req: any, @Param('streamId') streamId: string) {
-    return this.vod.getLiveStreamUrl(req.user.userId, streamId);
-  }
-
-  // ====== TV : Proxy HLS anti-CORS ======
-  @Get('live/:streamId/hls.m3u8')
-  async liveHlsManifest(@Req() req: any, @Param('streamId') streamId: string, @Res() res: any) {
-    const text = await this.vod.getLiveHlsManifest(req.user.userId, streamId);
+  @Get('movies/:id/hls')
+  async movieHls(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
+    this.requireAuth(req);
+    const text = await this.vod.buildMovieHls(id, req);
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cache-Control', 'no-store');
     res.send(text);
   }
 
-  @Get('live/:streamId/hls/seg')
-  async liveHlsSegAbs(@Req() req: any, @Param('streamId') streamId: string, @Query('u') u: string, @Res() res: any) {
-    await this.vod.pipeLiveAbsoluteSegment(req.user.userId, streamId, u, res);
+  @Get('episodes/:id/hls')
+  async episodeHls(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
+    this.requireAuth(req);
+    const text = await this.vod.buildEpisodeHls(id, req);
+    res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(text);
   }
 
-  // ✅ on forward aussi la query (tokens)
-  @Get('live/:streamId/hls/:assetPath(*)')
-  async liveHlsSegRelWildcard(
-    @Req() req: any,
-    @Param('streamId') streamId: string,
-    @Param('assetPath') assetPath: string,
-    @Query() query: Record<string, any>,
-    @Res() res: any,
-  ) {
-    await this.vod.pipeLiveRelativePath(req.user.userId, streamId, assetPath, query, res);
+  @Get('proxy/seg')
+  async proxySeg(@Query('u') u: string, @Req() req: Request, @Res() res: Response) {
+    this.requireAuth(req);
+    await this.vod.pipeSegment(u, res);
   }
 }
