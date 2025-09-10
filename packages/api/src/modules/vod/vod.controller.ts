@@ -89,13 +89,15 @@ export class VodController {
     await this.vod.pipeLiveAbsoluteSegment(req.user.userId, streamId, u, res);
   }
 
+  // ✅ on forward aussi la query (tokens)
   @Get('live/:streamId/hls/:assetPath(*)')
   async liveHlsSegRelWildcard(
     @Req() req: any,
     @Param('streamId') streamId: string,
     @Param('assetPath') assetPath: string,
+    @Query() query: Record<string, any>,
     @Res() res: any,
   ) {
-    await this.vod.pipeLiveRelativePath(req.user.userId, streamId, assetPath, res);
+    await this.vod.pipeLiveRelativePath(req.user.userId, streamId, assetPath, query, res);
   }
 }
