@@ -1,103 +1,142 @@
-import React from 'react';
-import { api } from '../lib/api';
+import React, { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import Hls from 'hls.js';
+import { api } from '../lib/api';
+import { attachProgressReporter } from '../lib/progress';
 
-type Season = { season: number; episodes: { id: string; number: number; title: string }[] };
+type Series = {
+  id: string;
+  title: string;
+  description?: string;
+  rating?: number | null;
+  poster?: string | null;
+  backdrop?: string | null;
+  released?: string | null;
+  genres?: string[];
+};
+
+type Seasons = {
+  seriesId: string;
+  seasons: Array<{ season: number; episodes: Array<{ id: string; number: number; title: string }> }>;
+};
 
 export default function ShowDetails() {
-  const { id } = useParams<{ id: string }>();
-  const [details, setDetails] = React.useState<any>(null);
-  const [seasons, setSeasons] = React.useState<Season[]>([]);
-  const [err, setErr] = React.useState('');
-  const [playing, setPlaying] = React.useState<{ url: string; title: string } | null>(null);
+  const { seriesId = '' } = useParams();
+  const [info, setInfo] = useState<Series | null>(null);
+  const [seasons, setSeasons] = useState<Seasons | null>(null);
+  const [currentEpisodeId, setCurrentEpisodeId] = useState<string | null>(null);
+  const [playUrl, setPlayUrl] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
-  React.useEffect(() => {
+  useEffect(() => {
     let mounted = true;
-    (async () => {
-      try {
-        const [d, s] = await Promise.all([
-          api(`/vod/shows/${id}/details`),
-          api(`/vod/shows/${id}/seasons`),
-        ]);
-        if (!mounted) return;
-        setDetails(d);
-        setSeasons((s?.seasons || []).sort((a: any, b: any) => a.season - b.season));
-      } catch (e: any) {
-        setErr(e?.message || 'Erreur');
-      }
-    })();
+    const load = async () => {
+      const i = await api(`/vod/shows/${encodeURIComponent(seriesId)}/details`);
+      const s = await api(`/vod/shows/${encodeURIComponent(seriesId)}/seasons`);
+      if (!mounted) return;
+      setInfo(i);
+      setSeasons(s);
+      // pré-sélection premier épisode si dispo
+      const first = s?.seasons?.[0]?.episodes?.[0];
+      if (first) setCurrentEpisodeId(first.id);
+    };
+    load().catch(console.error);
     return () => { mounted = false; };
-  }, [id]);
+  }, [seriesId]);
 
-  async function playEpisode(epId: string, title: string) {
-    setErr('');
-    try {
-      const res = await api(`/vod/episodes/${epId}/url`);
-      setPlaying({ url: res.url, title });
-    } catch (e: any) {
-      setErr(e?.message || 'Impossible de lancer la lecture');
+  useEffect(() => {
+    let mounted = true;
+    if (!currentEpisodeId) return;
+    api(`/episodes/${encodeURIComponent(currentEpisodeId)}/url`)
+      .then((r) => { if (mounted) setPlayUrl(r.url); })
+      .catch(console.error);
+    return () => { mounted = false; };
+  }, [currentEpisodeId]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !playUrl || !currentEpisodeId) return;
+    let hls: Hls | null = null;
+    let cleanup: (() => void) | null = null;
+
+    const attachReporter = () => {
+      if (!cleanup) {
+        cleanup = attachProgressReporter(video, {
+          kind: 'EPISODE',
+          refId: currentEpisodeId,
+          seriesId,
+        });
+      }
+    };
+
+    const onLoaded = () => attachReporter();
+
+    if (Hls.isSupported()) {
+      hls = new Hls({ enableWorker: true });
+      hls.attachMedia(video);
+      hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+        hls!.loadSource(playUrl);
+      });
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = playUrl;
+    } else {
+      video.src = playUrl;
     }
-  }
 
-  if (err) return <div style={{ color:'#ff7b7b' }}>{err}</div>;
-  if (!details) return <div>Chargement…</div>;
+    if (video.readyState >= 1) attachReporter();
+    video.addEventListener('loadedmetadata', onLoaded);
+
+    return () => {
+      video.removeEventListener('loadedmetadata', onLoaded);
+      if (cleanup) cleanup();
+      if (hls) hls.destroy();
+    };
+  }, [seriesId, currentEpisodeId, playUrl]);
+
+  if (!info) return <div style={{ padding: 16 }}>Chargement…</div>;
 
   return (
-    <div style={{ display:'grid', gap:16 }}>
-      {/* Header */}
-      <div style={{ display:'grid', gridTemplateColumns:'180px 1fr', gap:16 }}>
-        <div style={{ width:180, borderRadius:12, overflow:'hidden', border:'1px solid #222', background:'#111' }}>
-          <div style={{
-            aspectRatio:'2/3',
-            backgroundImage: details.poster ? `url(${details.poster})` : undefined,
-            backgroundSize:'cover', backgroundPosition:'center'
-          }} />
-        </div>
-        <div>
-          <h2 style={{ margin:'0 0 8px' }}>{details.title}</h2>
-          <div style={{ opacity:0.85, marginBottom:8 }}>
-            {details.rating ? `Note : ${details.rating}/10` : '—'}
-            {details.released ? ` · ${details.released}` : ''}
-          </div>
-          <p style={{ opacity:0.9 }}>{details.description || 'Aucune description'}</p>
-        </div>
-      </div>
-
-      {/* Player (si en lecture) */}
-      {playing && (
-        <div style={{ border:'1px solid #222', borderRadius:12, overflow:'hidden', background:'#000' }}>
-          <div style={{ padding:'8px 12px', borderBottom:'1px solid #222', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-            <strong>{playing.title}</strong>
-            <button onClick={() => setPlaying(null)} style={{ padding:'6px 10px', borderRadius:8, border:'1px solid #333', background:'transparent', color:'#fff' }}>Fermer</button>
-          </div>
-          <video
-            controls
-            autoPlay
-            style={{ width:'100%', height:'min(70vh, 720px)', background:'#000' }}
-            src={playing.url}
-          />
-        </div>
+    <div style={{ padding: 16, color: '#fff' }}>
+      <h1 style={{ marginBottom: 8 }}>{info.title}</h1>
+      {info.rating != null && <div style={{ opacity: 0.8 }}>Note: {info.rating}</div>}
+      {info.genres && info.genres.length > 0 && (
+        <div style={{ opacity: 0.8, marginTop: 4 }}>{info.genres.join(' • ')}</div>
       )}
+      {info.description && <p style={{ marginTop: 12, maxWidth: 800, lineHeight: 1.5 }}>{info.description}</p>}
 
-      {/* Saisons / Episodes */}
-      <div style={{ display:'grid', gap:20 }}>
-        {seasons.map((s) => (
-          <div key={s.season}>
-            <h3 style={{ margin:'8px 0' }}>Saison {s.season}</h3>
-            <div style={{ display:'grid', gap:8 }}>
-              {s.episodes.map((e) => (
-                <div key={e.id} style={{ display:'flex', alignItems:'center', gap:12, padding:'8px 10px', border:'1px solid #222', borderRadius:10 }}>
-                  <div style={{ width:36, textAlign:'right', opacity:0.8 }}>E{e.number}</div>
-                  <div style={{ flex:1 }}>{e.title}</div>
-                  <button onClick={() => playEpisode(e.id, `S${s.season}E${e.number} — ${e.title}`)}
-                          style={{ padding:'6px 10px', borderRadius:8, border:'1px solid #333', background:'#fff', color:'#000', fontWeight:700 }}>
-                    ▶ Lire
-                  </button>
-                </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 16, marginTop: 20 }}>
+        <div style={{ maxHeight: 520, overflow: 'auto', border: '1px solid #222', borderRadius: 8 }}>
+          {seasons?.seasons?.map(sea => (
+            <div key={sea.season}>
+              <div style={{ padding: '6px 10px', background: '#141414', borderBottom: '1px solid #222' }}>
+                Saison {sea.season}
+              </div>
+              {sea.episodes.map(ep => (
+                <button
+                  key={ep.id}
+                  onClick={() => setCurrentEpisodeId(ep.id)}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    textAlign: 'left',
+                    padding: '8px 10px',
+                    border: 'none',
+                    background: currentEpisodeId === ep.id ? '#1f1f1f' : 'transparent',
+                    color: '#fff',
+                    cursor: 'pointer',
+                    borderBottom: '1px solid #222'
+                  }}
+                >
+                  E{String(ep.number).padStart(2, '0')} — {ep.title}
+                </button>
               ))}
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
+
+        <div>
+          <video ref={videoRef} controls playsInline style={{ width: '100%', maxWidth: 1000, background: '#000' }} />
+        </div>
       </div>
     </div>
   );
