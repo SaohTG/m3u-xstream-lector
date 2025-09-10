@@ -1,4 +1,3 @@
-// imports habituels
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -13,11 +12,33 @@ export class PlaylistsService {
     private readonly repo: Repository<Playlist>,
   ) {}
 
-  /** Récupère la playlist active pour l'utilisateur (à adapter si ton modèle diffère) */
+  /** Sélection “active” côté app : on privilégie active/enabled s’ils existent, sinon la plus récente. */
+  private pickActive(playlists: Playlist[]): Playlist | null {
+    if (!playlists?.length) return null;
+    // si l’entité expose (au runtime) active/enabled/is_active => on le privilégie
+    const withFlag = playlists.find(
+      (p) => (p as any).active === true || (p as any).enabled === true || (p as any).is_active === true,
+    );
+    return withFlag || playlists[0];
+  }
+
+  /** Playlist “active” pour un utilisateur (sans présumer des colonnes). */
   async getActiveForUser(userId: string): Promise<Playlist | null> {
-    return await this.repo.findOne({
-      where: { user_id: userId, is_active: true },
+    const items = await this.repo.find({
+      where: { user_id: userId as any }, // user_id existe dans ton modèle
+      order: { updated_at: 'DESC' as any, created_at: 'DESC' as any, id: 'DESC' as any },
+      take: 50,
     });
+    return this.pickActive(items);
+  }
+
+  /** Playlist “active” globale s’il n’y a pas d’utilisateur fourni. */
+  private async getLatestActive(): Promise<Playlist | null> {
+    const items = await this.repo.find({
+      order: { updated_at: 'DESC' as any, created_at: 'DESC' as any, id: 'DESC' as any },
+      take: 50,
+    });
+    return this.pickActive(items);
   }
 
   /** ---------- HELPERS ---------- */
@@ -27,105 +48,79 @@ export class PlaylistsService {
     return url.replace(/\/+$/, '');
   }
 
-  /** Certains IDs côté M3U peuvent être encodés (ex: base64 de l’URL) */
+  /** Essaie de décoder un id en URL (base64/encodeURIComponent) pour M3U. */
   private tryDecodeUrlId(id: string): string | null {
     if (!id) return null;
     if (/^https?:\/\//i.test(id)) return id;
-
-    // essai base64
     try {
       const b = Buffer.from(id, 'base64').toString('utf8');
       if (/^https?:\/\//i.test(b)) return b;
     } catch {}
-
-    // essai URI encoded
     try {
       const d = decodeURIComponent(id);
       if (/^https?:\/\//i.test(d)) return d;
     } catch {}
-
     return null;
   }
 
-  /** Récupère (si tu l’as) une URL M3U depuis ton cache/DB d’items (à adapter si tu as une table vod_items) */
+  /** Si tu as une table d’indexation VOD pour M3U, fais la résolution ici (placeholder). */
   private async findM3UItemUrl(_playlistId: string, _externalId: string): Promise<string | null> {
-    // TODO: si tu as une table d’indexation (vod_items), remonte l’URL ici.
     return null;
   }
 
-  /** ---------- MÉTHODES ATTENDUES PAR VodService ---------- */
+  /** Récupère type + creds Xtream depuis la playlist, avec tolérance aux noms de colonnes. */
+  private extractSourceInfo(pl: Playlist): { type: PlaylistType; base?: string; user?: string; pass?: string } {
+    const anyPl = pl as any;
+    const type = String(anyPl.type || '').toUpperCase() as PlaylistType;
+    // champs possibles suivant tes versions: url/base_url/host/port/username/user/password/pass
+    let base: string | undefined =
+      anyPl.url || anyPl.base_url || anyPl.baseUrl || anyPl.host || undefined;
 
-  /**
-   * Construit l’URL de stream HLS d’un *film* selon la source active (Xtream/M3U).
-   * Signature attendue par VodService: (movieId: string) => Promise<string>
-   */
-  async getMovieStreamUrl(movieId: string, userId?: string): Promise<string> {
-    // 1) récupère la playlist active
-    // si userId non fourni, prends la plus récente active
-    const playlist =
-      userId ? await this.getActiveForUser(userId) :
-      await this.repo.findOne({ where: { is_active: true }, order: { updated_at: 'DESC' } });
-
-    if (!playlist) {
-      throw new NotFoundException('Aucune playlist active');
+    if (!base && anyPl.host) {
+      base = String(anyPl.host);
+      if (anyPl.port) base += `:${anyPl.port}`;
+      if (!/^https?:\/\//i.test(base)) base = `http://${base}`;
     }
 
-    const type = (playlist.type as PlaylistType) || 'XTREAM';
+    const user = anyPl.username || anyPl.user;
+    const pass = anyPl.password || anyPl.pass;
+
+    return { type: (type === 'XTREAM' || type === 'M3U') ? type : 'XTREAM', base: this.sanitizeBase(base), user, pass };
+  }
+
+  /** ---------- MÉTHODES UTILISÉES PAR VodService ---------- */
+
+  async getMovieStreamUrl(movieId: string, userId?: string): Promise<string> {
+    const playlist = userId ? await this.getActiveForUser(userId) : await this.getLatestActive();
+    if (!playlist) throw new NotFoundException('Aucune playlist active');
+
+    const { type, base, user, pass } = this.extractSourceInfo(playlist);
 
     if (type === 'XTREAM') {
-      const base = this.sanitizeBase(
-        (playlist as any).url || (playlist as any).host || (playlist as any).base_url,
-      );
-      const user = (playlist as any).username || (playlist as any).user;
-      const pass = (playlist as any).password || (playlist as any).pass;
-
-      if (!base || !user || !pass) {
-        throw new NotFoundException('Paramètres Xtream manquants');
-      }
-
-      // schéma Xtream Codes pour VOD (m3u8 si dispo, sinon .mp4)
+      if (!base || !user || !pass) throw new NotFoundException('Paramètres Xtream manquants');
+      // film en HLS (si le serveur le sert en m3u8)
       return `${base}/movie/${encodeURIComponent(user)}/${encodeURIComponent(pass)}/${encodeURIComponent(
         movieId,
       )}.m3u8`;
     }
 
-    // M3U: retrouver l’URL réelle
+    // M3U
     const fromIndex = await this.findM3UItemUrl(playlist.id, movieId);
     if (fromIndex) return fromIndex;
-
     const decoded = this.tryDecodeUrlId(movieId);
     if (decoded) return decoded;
 
     throw new NotFoundException('URL de film introuvable');
   }
 
-  /**
-   * Construit l’URL de stream HLS d’un *épisode* de série.
-   * Signature attendue par VodService: (episodeId: string) => Promise<string>
-   */
   async getEpisodeStreamUrl(episodeId: string, userId?: string): Promise<string> {
-    const playlist =
-      userId ? await this.getActiveForUser(userId) :
-      await this.repo.findOne({ where: { is_active: true }, order: { updated_at: 'DESC' } });
+    const playlist = userId ? await this.getActiveForUser(userId) : await this.getLatestActive();
+    if (!playlist) throw new NotFoundException('Aucune playlist active');
 
-    if (!playlist) {
-      throw new NotFoundException('Aucune playlist active');
-    }
-
-    const type = (playlist.type as PlaylistType) || 'XTREAM';
+    const { type, base, user, pass } = this.extractSourceInfo(playlist);
 
     if (type === 'XTREAM') {
-      const base = this.sanitizeBase(
-        (playlist as any).url || (playlist as any).host || (playlist as any).base_url,
-      );
-      const user = (playlist as any).username || (playlist as any).user;
-      const pass = (playlist as any).password || (playlist as any).pass;
-
-      if (!base || !user || !pass) {
-        throw new NotFoundException('Paramètres Xtream manquants');
-      }
-
-      // schéma Xtream Codes pour EPISODE
+      if (!base || !user || !pass) throw new NotFoundException('Paramètres Xtream manquants');
       return `${base}/series/${encodeURIComponent(user)}/${encodeURIComponent(pass)}/${encodeURIComponent(
         episodeId,
       )}.m3u8`;
@@ -134,32 +129,21 @@ export class PlaylistsService {
     // M3U
     const fromIndex = await this.findM3UItemUrl(playlist.id, episodeId);
     if (fromIndex) return fromIndex;
-
     const decoded = this.tryDecodeUrlId(episodeId);
     if (decoded) return decoded;
 
-    throw new NotFoundException('URL d’épisode introuvable');
+    throw new NotFoundException 'URL d’épisode introuvable');
   }
 
-  /** (bonus) chaîne live si besoin plus tard */
+  /** (facultatif) Live si nécessaire ailleurs */
   async getLiveStreamUrl(streamId: string, userId?: string): Promise<string> {
-    const playlist =
-      userId ? await this.getActiveForUser(userId) :
-      await this.repo.findOne({ where: { is_active: true }, order: { updated_at: 'DESC' } });
-
+    const playlist = userId ? await this.getActiveForUser(userId) : await this.getLatestActive();
     if (!playlist) throw new NotFoundException('Aucune playlist active');
 
-    const type = (playlist.type as PlaylistType) || 'XTREAM';
+    const { type, base, user, pass } = this.extractSourceInfo(playlist);
 
     if (type === 'XTREAM') {
-      const base = this.sanitizeBase(
-        (playlist as any).url || (playlist as any).host || (playlist as any).base_url,
-      );
-      const user = (playlist as any).username || (playlist as any).user;
-      const pass = (playlist as any).password || (playlist as any).pass;
-      if (!base || !user || !pass) {
-        throw new NotFoundException('Paramètres Xtream manquants');
-      }
+      if (!base || !user || !pass) throw new NotFoundException('Paramètres Xtream manquants');
       return `${base}/live/${encodeURIComponent(user)}/${encodeURIComponent(pass)}/${encodeURIComponent(
         streamId,
       )}.m3u8`;
@@ -167,7 +151,6 @@ export class PlaylistsService {
 
     const fromIndex = await this.findM3UItemUrl(playlist.id, streamId);
     if (fromIndex) return fromIndex;
-
     const decoded = this.tryDecodeUrlId(streamId);
     if (decoded) return decoded;
 
