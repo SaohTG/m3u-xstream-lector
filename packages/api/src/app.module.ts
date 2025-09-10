@@ -1,4 +1,4 @@
-import { Module, LogLevel } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
@@ -14,6 +14,7 @@ import { ProgressModule } from './modules/progress/progress.module';
       autoLoadEntities: true,
       synchronize: true,
       ssl: process.env.PGSSL === 'true' ? { rejectUnauthorized: false } : undefined,
+      logging: process.env.TYPEORM_LOGGING === 'true',
     }),
     AuthModule,
     UsersModule,
