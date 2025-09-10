@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import axios from 'axios';
 import { PlaylistsService } from '../playlists/playlists.service';
+import { ProgressService } from '../progress/progress.service';
 
 type RailItem = {
   id: string;
@@ -14,7 +15,10 @@ type Rail = { key: string; title: string; items: RailItem[] };
 
 @Injectable()
 export class VodService {
-  constructor(private readonly playlists: PlaylistsService) {}
+  constructor(
+    private readonly playlists: PlaylistsService,
+    private readonly progress: ProgressService,
+  ) {}
 
   // ========= Helpers Xtream =========
   private xt(base: string, user: string, pass: string) {
@@ -43,8 +47,114 @@ export class VodService {
     return { baseUrl, user: pl.username!, pass: pl.password! };
   }
 
+  private toPct(p: number, d: number) {
+    if (!d) return 0;
+    return Math.round((p / d) * 100);
+  }
+
+  // ========= Rails "Continuer" =========
+  private async continueMoviesRail(userId: string): Promise<Rail | null> {
+    const pl = await this.playlists.getActiveForUser(userId);
+    if (!pl || pl.type !== 'XTREAM') return null;
+
+    const rows = await this.progress.listInProgress(userId, 'MOVIE', 20);
+    if (!rows.length) return null;
+
+    const base = this.xt(pl.base_url!, pl.username!, pl.password!);
+    const limited = rows.slice(0, 15);
+
+    const metas = await Promise.all(limited.map(async (r) => {
+      try {
+        const data = await this.xtGet(base, { action: 'get_vod_info', vod_id: r.ref_id });
+        const info = data?.info || {};
+        return {
+          ok: true,
+          id: String(r.ref_id),
+          title: String(info.name || info.title || '').trim(),
+          poster: info.movie_image || info.cover || null,
+          year: info.releasedate ? Number(String(info.releasedate).slice(0, 4)) : (info.year ? Number(info.year) : null),
+          pct: this.toPct(r.position, r.duration),
+        };
+      } catch {
+        return { ok: false };
+      }
+    }));
+
+    const items: RailItem[] = metas
+      .filter((m: any) => m.ok)
+      .map((m: any) => ({
+        id: m.id,
+        title: `${m.title} • ${m.pct}%`,
+        poster: m.poster,
+        year: m.year || null,
+        category: 'Continuer',
+        added_at: null,
+      }));
+
+    if (!items.length) return null;
+    return { key: 'continue-movies', title: 'Continuer les films', items };
+  }
+
+  private async continueEpisodesRail(userId: string): Promise<Rail | null> {
+    const pl = await this.playlists.getActiveForUser(userId);
+    if (!pl || pl.type !== 'XTREAM') return null;
+
+    const rows = await this.progress.listInProgress(userId, 'EPISODE', 20);
+    if (!rows.length) return null;
+
+    const base = this.xt(pl.base_url!, pl.username!, pl.password!);
+
+    const items: RailItem[] = [];
+    // Pour limiter les appels, on résout série par série
+    const bySeries: Record<string, typeof rows> = {};
+    rows.forEach((r) => {
+      const sid = String(r.series_id || 'unknown');
+      bySeries[sid] = bySeries[sid] || [];
+      bySeries[sid].push(r);
+    });
+
+    for (const [seriesId, list] of Object.entries(bySeries)) {
+      if (!seriesId || seriesId === 'unknown') continue;
+      try {
+        const data = await this.xtGet(base, { action: 'get_series_info', series_id: seriesId });
+        const info = data?.info || {};
+        const cover = info.cover || info.backdrop_path || null;
+        const episodesMap: Record<string, any> = {};
+        Object.values<any>(data?.episodes || {}).flat().forEach((e: any) => {
+          episodesMap[String(e.id)] = e;
+        });
+
+        list.slice(0, 6).forEach((r) => {
+          const e = episodesMap[String(r.ref_id)];
+          if (!e) return;
+          const epNum = Number(e.episode_num || e.episode) || 0;
+          const title = String(info.name || '').trim();
+          const pct = this.toPct(r.position, r.duration);
+          items.push({
+            id: String(r.ref_id),
+            title: `${title} – E${String(epNum).padStart(2, '0')} • ${pct}%`,
+            poster: cover,
+            category: 'Continuer',
+            year: null,
+            added_at: null,
+          });
+        });
+      } catch {
+        // ignore série KO
+      }
+    }
+
+    if (!items.length) return null;
+    return { key: 'continue-episodes', title: 'Continuer les épisodes', items: items.slice(0, 15) };
+  }
+
   // ========= FILMS =========
   async getMovieRails(userId: string): Promise<Rail[]> {
+    const rails: Rail[] = [];
+
+    const cont = await this.continueMoviesRail(userId);
+    if (cont) rails.push(cont);
+
     const pl = await this.playlists.getActiveForUser(userId);
     if (!pl) throw new BadRequestException('Aucune source liée');
 
@@ -57,8 +167,6 @@ export class VodService {
 
       const catNames: Record<string, string> = {};
       (cats || []).forEach((c: any) => (catNames[c.category_id] = c.category_name));
-
-      const rails: Rail[] = [];
 
       const recents = [...(list || [])]
         .sort((a: any, b: any) => (b.added || 0) - (a.added || 0))
@@ -109,7 +217,7 @@ export class VodService {
       return rails;
     }
 
-    return [];
+    return rails;
   }
 
   async getMovieDetails(userId: string, movieId: string) {
@@ -152,6 +260,11 @@ export class VodService {
 
   // ========= SÉRIES =========
   async getShowRails(userId: string): Promise<Rail[]> {
+    const rails: Rail[] = [];
+
+    const cont = await this.continueEpisodesRail(userId);
+    if (cont) rails.push(cont);
+
     const pl = await this.playlists.getActiveForUser(userId);
     if (!pl) throw new BadRequestException('Aucune source liée');
 
@@ -164,8 +277,6 @@ export class VodService {
 
       const catNames: Record<string, string> = {};
       (cats || []).forEach((c: any) => (catNames[c.category_id] = c.category_name));
-
-      const rails: Rail[] = [];
 
       const recents = [...(list || [])]
         .sort((a: any, b: any) => (b.added || 0) - (a.added || 0))
@@ -201,7 +312,7 @@ export class VodService {
       return rails;
     }
 
-    return [];
+    return rails;
   }
 
   async getSeriesDetails(userId: string, seriesId: string) {
@@ -347,13 +458,11 @@ export class VodService {
         const l = line.trim();
         if (!l) return line;
 
-        // Réécrire URI="..." dans KEY/MAP
         if (l.startsWith('#EXT-X-KEY') || l.startsWith('#EXT-X-MAP')) {
           return line.replace(/URI="([^"]+)"/, (_m, g1) => `URI="${rewriteUri(g1)}"`);
         }
 
-        // Lignes playlist (URI simple)
-        if (l.startsWith('#')) return line; // commentaire/pragma non-URI
+        if (l.startsWith('#')) return line; // pragma/comment
         return rewriteUri(l);
       })
       .join('\n');
@@ -362,7 +471,7 @@ export class VodService {
   }
 
   // ========= ABSOLU (seg?u=...) =========
-  async pipeLiveAbsoluteSegment(userId: string, streamId: string, u: string, res: any) {
+  async pipeLiveAbsoluteSegment(userId: string, _streamId: string, u: string, res: any) {
     const { baseUrl } = await this.getXtreamBase(userId);
 
     const raw = String(u || '');
