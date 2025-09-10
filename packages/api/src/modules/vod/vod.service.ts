@@ -330,7 +330,7 @@ export class VodService {
     const text: string = resp.data;
     const origin = new URL(baseUrl).origin;
 
-    // Réécriture : 
+    // Réécriture :
     // - URL absolue -> seg?u=...
     // - Chemin commençant par "/" -> seg?u=origin + path
     // - Chemin relatif -> wildcard /hls/<assetPath> (encodeURI conserve les "/")
@@ -352,20 +352,41 @@ export class VodService {
     return rewritten;
   }
 
+  // ========= PATCH: accepter host (sans port) + chemins /play/, /hls-nginx, etc. =========
   async pipeLiveAbsoluteSegment(userId: string, streamId: string, u: string, res: any) {
     const { baseUrl } = await this.getXtreamBase(userId);
-    const url = new URL(u);
-    const base = new URL(baseUrl);
-    if (url.host !== base.host) throw new BadRequestException('Host non autorisé');
 
-    // Autoriser les chemins HLS communs (live/, play/, hls/, etc.)
+    const raw = String(u || '');
+    const decodedOnce = decodeURIComponent(raw);
+
+    let url: URL;
+    try {
+      url = new URL(decodedOnce);
+    } catch {
+      url = new URL(raw);
+    }
+
+    const base = new URL(baseUrl);
+
+    // Comparer sur hostname uniquement (ignore le port)
+    const urlHost = url.hostname.toLowerCase();
+    const baseHost = base.hostname.toLowerCase();
+    if (urlHost !== baseHost) {
+      throw new BadRequestException(`Host non autorisé: ${urlHost} != ${baseHost}`);
+    }
+
+    // Autoriser chemins HLS courants
+    const p = url.pathname;
     const allowed =
-      url.pathname.startsWith('/live/') ||
-      url.pathname.startsWith('/play/') ||
-      url.pathname.startsWith('/hls') ||
-      url.pathname.endsWith('.m3u8') ||
-      url.pathname.endsWith('.ts');
-    if (!allowed) throw new BadRequestException('Chemin non autorisé');
+      p.startsWith('/live/') ||
+      p.startsWith('/play/') ||
+      p.startsWith('/hls') ||
+      p.startsWith('/hls-nginx') ||
+      p.endsWith('.m3u8') ||
+      p.endsWith('.ts');
+    if (!allowed) {
+      throw new BadRequestException(`Chemin non autorisé: ${p}`);
+    }
 
     const upstream = await axios.get(url.toString(), {
       responseType: 'stream',
@@ -376,10 +397,14 @@ export class VodService {
         'Accept': '*/*',
       },
     });
-    if (upstream.status >= 400) throw new BadRequestException(`Upstream ${upstream.status}`);
+    if (upstream.status >= 400) {
+      throw new BadRequestException(`Upstream ${upstream.status}`);
+    }
 
     res.setHeader('Access-Control-Allow-Origin', '*');
-    if (upstream.headers['content-type']) res.setHeader('Content-Type', upstream.headers['content-type'] as string);
+    if (upstream.headers['content-type']) {
+      res.setHeader('Content-Type', upstream.headers['content-type'] as string);
+    }
     upstream.data.pipe(res);
   }
 
