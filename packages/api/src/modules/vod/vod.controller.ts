@@ -1,7 +1,12 @@
 import {
-  Controller, Get, Param, Query, Res, Req, UnauthorizedException,
+  Controller,
+  Get,
+  Param,
+  Query,
+  Res,
+  Req,
+  UnauthorizedException,
 } from '@nestjs/common';
-import { Response, Request } from 'express';
 import { JwtService } from '@nestjs/jwt';
 import { VodService } from './vod.service';
 
@@ -13,11 +18,11 @@ export class VodController {
   ) {}
 
   /** Vérifie JWT via header ou query ?t= */
-  private requireAuth(req: Request) {
+  private requireAuth(req: any) {
     let token = '';
-    const h = req.headers['authorization'];
+    const h = req.headers?.authorization;
     if (h && typeof h === 'string' && h.toLowerCase().startsWith('bearer ')) token = h.slice(7);
-    if (!token && typeof req.query.t === 'string') token = req.query.t;
+    if (!token && typeof req.query?.t === 'string') token = req.query.t;
     if (!token) throw new UnauthorizedException('Missing token');
     try {
       return this.jwt.verify(token, { secret: process.env.JWT_SECRET || 'changeme' });
@@ -27,7 +32,7 @@ export class VodController {
   }
 
   @Get('movies/:id/hls')
-  async movieHls(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
+  async movieHls(@Param('id') id: string, @Req() req: any, @Res() res: any) {
     this.requireAuth(req);
     const text = await this.vod.buildMovieHls(id, req);
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
@@ -36,7 +41,7 @@ export class VodController {
   }
 
   @Get('episodes/:id/hls')
-  async episodeHls(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
+  async episodeHls(@Param('id') id: string, @Req() req: any, @Res() res: any) {
     this.requireAuth(req);
     const text = await this.vod.buildEpisodeHls(id, req);
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
@@ -45,7 +50,7 @@ export class VodController {
   }
 
   @Get('proxy/seg')
-  async proxySeg(@Query('u') u: string, @Req() req: Request, @Res() res: Response) {
+  async proxySeg(@Query('u') u: string, @Req() req: any, @Res() res: any) {
     this.requireAuth(req);
     await this.vod.pipeSegment(u, res);
   }
