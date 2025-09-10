@@ -1,43 +1,42 @@
 import { Controller, Get, Param, Req, UseGuards } from '@nestjs/common';
-import { VodService } from './vod.service';
 import { JwtAuthGuard } from '../auth/jwt.guard';
+import { VodService } from './vod.service';
 
 @Controller('vod')
 @UseGuards(JwtAuthGuard)
 export class VodController {
-  constructor(private svc: VodService) {}
+  constructor(private readonly vod: VodService) {}
 
-  // Listes simples
-  @Get('movies')
-  movies(@Req() req: any) {
-    return this.svc.movies(req.user.userId);
-  }
-
-  @Get('shows')
-  shows(@Req() req: any) {
-    return this.svc.shows(req.user.userId);
-  }
-
-  // Sections / rails
-  @Get('movies/sections')
-  movieSections(@Req() req: any) {
-    return this.svc.movieSections(req.user.userId);
-  }
-
-  @Get('shows/sections')
-  showSections(@Req() req: any) {
-    return this.svc.showSections(req.user.userId);
-  }
-
-  // Alias rétro pour anciens fronts
+  // --- Rails existants (si tu les as déjà, garde-les) ---
   @Get('movies/rails')
-  movieSectionsRails(@Req() req: any) {
-    return this.svc.movieSections(req.user.userId);
+  moviesRails(@Req() req: any) {
+    return this.vod.getMovieRails(req.user.userId);
   }
 
-  // ✅ Détail film (avec TMDB + URL de lecture)
-  @Get('movies/:id')
-  movieDetail(@Param('id') id: string, @Req() req: any) {
-    return this.svc.movieDetail(req.user.userId, id);
+  @Get('shows/rails')
+  showsRails(@Req() req: any) {
+    return this.vod.getShowRails(req.user.userId);
+  }
+
+  @Get('live/rails')
+  liveRails(@Req() req: any) {
+    return this.vod.getLiveRails(req.user.userId);
+  }
+
+  // --- NOUVEAU : Détails d'une série + saisons/épisodes ---
+  @Get('shows/:seriesId/details')
+  showDetails(@Req() req: any, @Param('seriesId') seriesId: string) {
+    return this.vod.getSeriesDetails(req.user.userId, seriesId);
+  }
+
+  @Get('shows/:seriesId/seasons')
+  showSeasons(@Req() req: any, @Param('seriesId') seriesId: string) {
+    return this.vod.getSeriesSeasons(req.user.userId, seriesId);
+  }
+
+  // --- NOUVEAU : URL de lecture d'un épisode ---
+  @Get('episodes/:episodeId/url')
+  episodeUrl(@Req() req: any, @Param('episodeId') episodeId: string) {
+    return this.vod.getEpisodeStreamUrl(req.user.userId, episodeId);
   }
 }
