@@ -13,25 +13,21 @@ export class VodController {
     return this.vod.getMovieRails(req.user.userId);
   }
 
-  // alias rétro-compat
   @Get('movies/sections')
   moviesSections(@Req() req: any) {
     return this.vod.getMovieRails(req.user.userId);
   }
 
-  // détails film (alias court)
   @Get('movies/:movieId')
   movieDetailsAlias(@Req() req: any, @Param('movieId') movieId: string) {
     return this.vod.getMovieDetails(req.user.userId, movieId);
   }
 
-  // détails film (explicite)
   @Get('movies/:movieId/details')
   movieDetails(@Req() req: any, @Param('movieId') movieId: string) {
     return this.vod.getMovieDetails(req.user.userId, movieId);
   }
 
-  // URL lecture film
   @Get('movies/:movieId/url')
   movieUrl(@Req() req: any, @Param('movieId') movieId: string) {
     return this.vod.getMovieStreamUrl(req.user.userId, movieId);
@@ -43,7 +39,6 @@ export class VodController {
     return this.vod.getShowRails(req.user.userId);
   }
 
-  // alias rétro-compat
   @Get('shows/sections')
   showsSections(@Req() req: any) {
     return this.vod.getShowRails(req.user.userId);
@@ -64,27 +59,23 @@ export class VodController {
     return this.vod.getEpisodeStreamUrl(req.user.userId, episodeId);
   }
 
-  // ========= TV (rails + URL directe optionnelle) =========
+  // ========= TV =========
   @Get('live/rails')
   liveRails(@Req() req: any) {
     return this.vod.getLiveRails(req.user.userId);
   }
 
-  // alias
   @Get('live/sections')
   liveSections(@Req() req: any) {
     return this.vod.getLiveRails(req.user.userId);
   }
 
-  // URL directe (rarement utilisée si on passe par le proxy HLS)
   @Get('live/:streamId/url')
   liveUrl(@Req() req: any, @Param('streamId') streamId: string) {
     return this.vod.getLiveStreamUrl(req.user.userId, streamId);
   }
 
-  // ========= TV : PROXY HLS anti-CORS =========
-
-  // Manifeste réécrit (.m3u8)
+  // ====== TV : Proxy HLS anti-CORS ======
   @Get('live/:streamId/hls.m3u8')
   async liveHlsManifest(@Req() req: any, @Param('streamId') streamId: string, @Res() res: any) {
     const text = await this.vod.getLiveHlsManifest(req.user.userId, streamId);
@@ -93,13 +84,11 @@ export class VodController {
     res.send(text);
   }
 
-  // Segment/playlist ABSOLU (si le manifeste référence des URLs http(s))
   @Get('live/:streamId/hls/seg')
   async liveHlsSegAbs(@Req() req: any, @Param('streamId') streamId: string, @Query('u') u: string, @Res() res: any) {
     await this.vod.pipeLiveAbsoluteSegment(req.user.userId, streamId, u, res);
   }
 
-  // Segment/playlist RELATIF avec chemins imbriqués (ex. 720p/seg-001.ts)
   @Get('live/:streamId/hls/:assetPath(*)')
   async liveHlsSegRelWildcard(
     @Req() req: any,
