@@ -43,14 +43,12 @@ export default function Live() {
     try {
       const { default: Hls } = await import('hls.js');
       if (Hls.isSupported()) {
-        // cleanup ancien lecteur
         if (hlsRef.current) {
           try { hlsRef.current.destroy?.(); } catch {}
           hlsRef.current = null;
         }
         const token = getToken();
         const hls = new Hls({
-          // debug: true, // active pour logs détaillés si besoin
           xhrSetup: (xhr: XMLHttpRequest) => {
             if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
           },
@@ -78,7 +76,6 @@ export default function Live() {
           }
         });
       } else {
-        // Safari: tentative native (l’Authorization ne peut pas être injectée ici, mais on passe par notre proxy)
         video.src = manifestUrl;
         await video.play();
       }
@@ -92,7 +89,6 @@ export default function Live() {
     <div style={{ display:'grid', gap:20 }}>
       {err ? <div style={{ color:'#ff7b7b' }}>{err}</div> : null}
 
-      {/* Player */}
       <div style={{ border:'1px solid #222', borderRadius:12, overflow:'hidden', background:'#000' }}>
         <div style={{ padding:'8px 12px', borderBottom:'1px solid #222', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
           <strong>{current?.title || 'Sélectionne une chaîne'}</strong>
@@ -114,7 +110,6 @@ export default function Live() {
         />
       </div>
 
-      {/* Rails par catégories */}
       {rails.map((rail) => (
         <div key={rail.key}>
           <h3 style={{ margin:'8px 0' }}>{rail.title}</h3>
