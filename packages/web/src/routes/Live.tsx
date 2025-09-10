@@ -4,9 +4,9 @@ import { api, getToken } from '../lib/api';
 export default function Live() {
   const [rails, setRails] = React.useState<any[]>([]);
   const [err, setErr] = React.useState<string>('');
+  const [current, setCurrent] = React.useState<{ id: string; title: string } | null>(null);
   const videoRef = React.useRef<HTMLVideoElement | null>(null);
   const hlsRef = React.useRef<any>(null);
-  const [current, setCurrent] = React.useState<{ id: string; title: string } | null>(null);
 
   const apiBase = (import.meta as any).env?.VITE_API_BASE || '';
 
@@ -37,46 +37,54 @@ export default function Live() {
     setCurrent({ id, title });
 
     const manifestUrl = `${apiBase}/vod/live/${encodeURIComponent(id)}/hls.m3u8`;
-
     const video = videoRef.current!;
     if (!video) return;
 
-    // Safari: HLS natif
-    if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      // On ne peut pas injecter l'Authorization header avec <video> natif.
-      // Mais nos endpoints proxy sont sur le même host:port API et acceptent Bearer via XHR -> on utilise hls.js pour tous les navigateurs pour uniformiser.
-    }
-
-    // hls.js fallback / standard (Chrome/Firefox/Edge)
-    const { default: Hls } = await import('hls.js');
-    if (Hls.isSupported()) {
-      // cleanup ancien lecteur
-      if (hlsRef.current) {
-        hlsRef.current.destroy?.();
-        hlsRef.current = null;
-      }
-      const token = getToken();
-      const hls = new Hls({
-        // on peut activer low-latency si besoin
-        // lowLatencyMode: true,
-        xhrSetup: (xhr: XMLHttpRequest) => {
-          if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-        },
-      });
-      hlsRef.current = hls;
-      hls.attachMedia(video);
-      hls.on(Hls.Events.MEDIA_ATTACHED, () => {
-        hls.loadSource(manifestUrl);
-      });
-      hls.on(Hls.Events.ERROR, (_evt: any, data: any) => {
-        if (data?.fatal) {
-          setErr('Erreur de lecture HLS');
+    try {
+      const { default: Hls } = await import('hls.js');
+      if (Hls.isSupported()) {
+        // cleanup ancien lecteur
+        if (hlsRef.current) {
+          try { hlsRef.current.destroy?.(); } catch {}
+          hlsRef.current = null;
         }
-      });
-    } else {
-      // Dernier fallback (rare): tenter source direct (ne passera pas l’Authorization)
-      video.src = manifestUrl;
-      video.play().catch(() => setErr('Impossible de démarrer la chaîne'));
+        const token = getToken();
+        const hls = new Hls({
+          // debug: true, // active pour logs détaillés si besoin
+          xhrSetup: (xhr: XMLHttpRequest) => {
+            if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+          },
+          maxBufferLength: 30,
+          liveDurationInfinity: true,
+        });
+        hlsRef.current = hls;
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MEDIA_ATTACHED, () => hls.loadSource(manifestUrl));
+        hls.on(Hls.Events.ERROR, (_evt: any, data: any) => {
+          console.warn('[HLS] error', data);
+          if (!data?.fatal) return;
+          switch (data.type) {
+            case Hls.ErrorTypes.NETWORK_ERROR:
+              try { hls.startLoad(0); } catch {}
+              break;
+            case Hls.ErrorTypes.MEDIA_ERROR:
+              try { hls.recoverMediaError(); } catch {}
+              break;
+            default:
+              setErr('Erreur de lecture HLS');
+              try { hls.destroy(); } catch {}
+              hlsRef.current = null;
+              break;
+          }
+        });
+      } else {
+        // Safari: tentative native (l’Authorization ne peut pas être injectée ici, mais on passe par notre proxy)
+        video.src = manifestUrl;
+        await video.play();
+      }
+    } catch (e: any) {
+      console.error('HLS loader error', e);
+      setErr('Erreur de lecteur HLS');
     }
   }
 
@@ -89,8 +97,10 @@ export default function Live() {
         <div style={{ padding:'8px 12px', borderBottom:'1px solid #222', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
           <strong>{current?.title || 'Sélectionne une chaîne'}</strong>
           {current && (
-            <button onClick={() => { setCurrent(null); if (videoRef.current) videoRef.current.pause(); }}
-                    style={{ padding:'6px 10px', borderRadius:8, border:'1px solid #333', background:'transparent', color:'#fff' }}>
+            <button
+              onClick={() => { setCurrent(null); if (videoRef.current) videoRef.current.pause(); }}
+              style={{ padding:'6px 10px', borderRadius:8, border:'1px solid #333', background:'transparent', color:'#fff' }}
+            >
               Fermer
             </button>
           )}
