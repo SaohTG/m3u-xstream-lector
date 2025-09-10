@@ -17,8 +17,8 @@ export function attachProgressReporter(video: HTMLVideoElement, payload: Payload
       await api('/progress/report', {
         method: 'POST',
         body: JSON.stringify({
-          kind: payload.kind,
-          refId: payload.refId,
+          kind: (payload as any).kind,
+          refId: (payload as any).refId,
           seriesId: (payload as any).seriesId,
           position,
           duration,
@@ -31,12 +31,11 @@ export function attachProgressReporter(video: HTMLVideoElement, payload: Payload
   };
 
   const onTime = () => {
-    // envoie toutes les ~10s
     if (timer) return;
     timer = setTimeout(() => {
       timer = null;
       send();
-    }, 10000);
+    }, 10000); // ~10s
   };
 
   const onPause = () => send();
