@@ -1,4 +1,4 @@
-import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn, UpdateDateColumn, Unique } from 'typeorm';
+import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn, Unique, UpdateDateColumn } from 'typeorm';
 
 export type ProgressKind = 'MOVIE' | 'EPISODE';
 
@@ -15,13 +15,11 @@ export class ProgressEntity {
   @Column({ type: 'varchar', length: 10 })
   kind!: ProgressKind; // MOVIE | EPISODE
 
-  // movieId (pour MOVIE) ou episodeId (pour EPISODE)
   @Column({ type: 'varchar', length: 64 })
-  ref_id!: string;
+  ref_id!: string; // movieId ou episodeId
 
-  // pour EPISODE uniquement (facilite la résolution des métadonnées)
   @Column({ type: 'varchar', length: 64, nullable: true })
-  series_id!: string | null;
+  series_id!: string | null; // conseillé pour EPISODE
 
   @Column({ type: 'int', default: 0 })
   position!: number; // secondes
