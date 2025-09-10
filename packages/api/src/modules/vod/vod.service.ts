@@ -16,7 +16,7 @@ type Rail = { key: string; title: string; items: RailItem[] };
 export class VodService {
   constructor(private readonly playlists: PlaylistsService) {}
 
-  // ---------- RAILS FILMS ----------
+  // ----------------- FILMS : rails -----------------
   async getMovieRails(userId: string): Promise<Rail[]> {
     const pl = await this.playlists.getActiveForUser(userId);
     if (!pl) throw new BadRequestException('Aucune source liée');
@@ -33,7 +33,7 @@ export class VodService {
 
       const rails: Rail[] = [];
 
-      // Récents
+      // Récemment ajoutés
       const recents = [...(list || [])]
         .sort((a: any, b: any) => (b.added || 0) - (a.added || 0))
         .slice(0, 30)
@@ -85,11 +85,11 @@ export class VodService {
       return rails;
     }
 
-    // M3U : non structuré pour VOD, pas de rails par défaut
+    // M3U : VOD rarement structurée → pas de rails par défaut
     return [];
   }
 
-  // ---------- RAILS SÉRIES ----------
+  // ----------------- SÉRIES : rails -----------------
   async getShowRails(userId: string): Promise<Rail[]> {
     const pl = await this.playlists.getActiveForUser(userId);
     if (!pl) throw new BadRequestException('Aucune source liée');
@@ -142,7 +142,7 @@ export class VodService {
     return [];
   }
 
-  // ---------- RAILS LIVE ----------
+  // ----------------- LIVE : rails -----------------
   async getLiveRails(userId: string): Promise<Rail[]> {
     const pl = await this.playlists.getActiveForUser(userId);
     if (!pl) throw new BadRequestException('Aucune source liée');
@@ -178,13 +178,12 @@ export class VodService {
     return rails;
   }
 
-  // ---------- DÉTAILS FILM ----------
+  // ----------------- Détails FILM + URL -----------------
   async getMovieDetails(userId: string, movieId: string) {
     const pl = await this.playlists.getActiveForUser(userId);
     if (!pl) throw new BadRequestException('Aucune source liée');
-    if (pl.type !== 'XTREAM') {
-      throw new BadRequestException('Détail film disponible uniquement pour Xtream pour le moment.');
-    }
+    if (pl.type !== 'XTREAM') throw new BadRequestException('Détail film disponible uniquement pour Xtream pour le moment.');
+
     const base = this.xt(pl.base_url!, pl.username!, pl.password!);
     const data = await this.xtGet(base, { action: 'get_vod_info', vod_id: movieId });
     const info = data?.info || {};
@@ -202,15 +201,12 @@ export class VodService {
     };
   }
 
-  // ---------- URL STREAM FILM ----------
   async getMovieStreamUrl(userId: string, movieId: string) {
     const pl = await this.playlists.getActiveForUser(userId);
     if (!pl) throw new BadRequestException('Aucune source liée');
-    if (pl.type !== 'XTREAM') {
-      throw new BadRequestException('Lecture films disponible uniquement pour Xtream pour le moment.');
-    }
+    if (pl.type !== 'XTREAM') throw new BadRequestException('Lecture films disponible uniquement pour Xtream pour le moment.');
+
     const baseUrl = pl.base_url!.replace(/\/+$/, '');
-    // Essayer de récupérer l’extension exacte
     let ext = 'mp4';
     try {
       const base = this.xt(pl.base_url!, pl.username!, pl.password!);
@@ -221,13 +217,12 @@ export class VodService {
     return { url };
   }
 
-  // ---------- DÉTAILS SÉRIE / SAISONS / EP URL ----------
+  // ----------------- Détails SÉRIE / SAISONS / URL épisode -----------------
   async getSeriesDetails(userId: string, seriesId: string) {
     const pl = await this.playlists.getActiveForUser(userId);
     if (!pl) throw new BadRequestException('Aucune source liée');
-    if (pl.type !== 'XTREAM') {
-      throw new BadRequestException('Détail séries disponible uniquement pour Xtream pour le moment.');
-    }
+    if (pl.type !== 'XTREAM') throw new BadRequestException('Détail séries disponible uniquement pour Xtream pour le moment.');
+
     const base = this.xt(pl.base_url!, pl.username!, pl.password!);
     const data = await this.xtGet(base, { action: 'get_series_info', series_id: seriesId });
     const info = data?.info || {};
@@ -246,9 +241,8 @@ export class VodService {
   async getSeriesSeasons(userId: string, seriesId: string) {
     const pl = await this.playlists.getActiveForUser(userId);
     if (!pl) throw new BadRequestException('Aucune source liée');
-    if (pl.type !== 'XTREAM') {
-      throw new BadRequestException('Saisons/épisodes disponibles uniquement pour Xtream pour le moment.');
-    }
+    if (pl.type !== 'XTREAM') throw new BadRequestException('Saisons/épisodes disponibles uniquement pour Xtream pour le moment.');
+
     const base = this.xt(pl.base_url!, pl.username!, pl.password!);
     const data = await this.xtGet(base, { action: 'get_series_info', series_id: seriesId });
     const eps = data?.episodes || {};
@@ -272,16 +266,26 @@ export class VodService {
   async getEpisodeStreamUrl(userId: string, episodeId: string) {
     const pl = await this.playlists.getActiveForUser(userId);
     if (!pl) throw new BadRequestException('Aucune source liée');
-    if (pl.type !== 'XTREAM') {
-      throw new BadRequestException('Lecture épisodes disponible uniquement pour Xtream pour le moment.');
-    }
+    if (pl.type !== 'XTREAM') throw new BadRequestException('Lecture épisodes disponible uniquement pour Xtream pour le moment.');
+
     const baseUrl = pl.base_url!.replace(/\/+$/, '');
-    // Par défaut mp4 ; certains panels utilisent m3u8
     const url = `${baseUrl}/series/${encodeURIComponent(pl.username!)}/${encodeURIComponent(pl.password!)}/${encodeURIComponent(episodeId)}.mp4`;
     return { url };
   }
 
-  // ---------- Helpers Xtream ----------
+  // ----------------- URL LIVE -----------------
+  async getLiveStreamUrl(userId: string, streamId: string) {
+    const pl = await this.playlists.getActiveForUser(userId);
+    if (!pl) throw new BadRequestException('Aucune source liée');
+    if (pl.type !== 'XTREAM') throw new BadRequestException('Lecture live disponible uniquement pour Xtream pour le moment.');
+
+    const baseUrl = pl.base_url!.replace(/\/+$/, '');
+    // HLS par défaut (m3u8). Si ça ne lit pas sur Chrome, on ajoutera hls.js côté web.
+    const url = `${baseUrl}/live/${encodeURIComponent(pl.username!)}/${encodeURIComponent(pl.password!)}/${encodeURIComponent(streamId)}.m3u8`;
+    return { url };
+  }
+
+  // ----------------- Helpers Xtream -----------------
   private xt(base: string, user: string, pass: string) {
     const u = new URL('/player_api.php', base);
     u.searchParams.set('username', user);
@@ -292,7 +296,7 @@ export class VodService {
     const u = new URL(base.toString());
     Object.entries(params).forEach(([k, v]) => u.searchParams.set(k, String(v)));
     const resp = await axios.get(u.toString(), {
-      timeout: 15_000,
+      timeout: 15000,
       validateStatus: (s) => s >= 200 && s < 500,
     });
     if (resp.status >= 400) throw new BadRequestException(`Xtream ${resp.status}`);
