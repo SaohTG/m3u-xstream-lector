@@ -60,7 +60,6 @@ export class VodService {
 
       const rails: Rail[] = [];
 
-      // Récemment ajoutés
       const recents = [...(list || [])]
         .sort((a: any, b: any) => (b.added || 0) - (a.added || 0))
         .slice(0, 30)
@@ -74,7 +73,6 @@ export class VodService {
         }));
       rails.push({ key: 'recent', title: 'Récemment ajoutés', items: recents });
 
-      // Années récentes
       for (let y = new Date().getFullYear(); y >= 2018; y--) {
         const items = (list || [])
           .filter((m: any) => Number(m.year) === y)
@@ -90,7 +88,6 @@ export class VodService {
         if (items.length) rails.push({ key: `y-${y}`, title: `Films ${y}`, items });
       }
 
-      // Par catégories
       const byCat: Record<string, RailItem[]> = {};
       (list || []).forEach((m: any) => {
         const it: RailItem = {
@@ -112,7 +109,6 @@ export class VodService {
       return rails;
     }
 
-    // M3U : peu de VOD exploitable → rails vides par défaut
     return [];
   }
 
@@ -332,18 +328,24 @@ export class VodService {
     }
 
     const text: string = resp.data;
-    // Réécriture: lignes non-# (URI) -> proxifiées
+    const origin = new URL(baseUrl).origin;
+
+    // Réécriture : 
+    // - URL absolue -> seg?u=...
+    // - Chemin commençant par "/" -> seg?u=origin + path
+    // - Chemin relatif -> wildcard /hls/<assetPath> (encodeURI conserve les "/")
     const rewritten = text
       .split('\n')
       .map((line) => {
         const l = line.trim();
         if (!l || l.startsWith('#')) return line;
         if (/^https?:\/\//i.test(l)) {
-          // URL absolue -> route seg absolu
           return `/vod/live/${encodeURIComponent(streamId)}/hls/seg?u=${encodeURIComponent(l)}`;
         }
-        // relatif -> route relative wildcard
-        return `/vod/live/${encodeURIComponent(streamId)}/hls/${encodeURIComponent(l)}`;
+        if (l.startsWith('/')) {
+          return `/vod/live/${encodeURIComponent(streamId)}/hls/seg?u=${encodeURIComponent(origin + l)}`;
+        }
+        return `/vod/live/${encodeURIComponent(streamId)}/hls/${encodeURI(l)}`;
       })
       .join('\n');
 
@@ -351,14 +353,19 @@ export class VodService {
   }
 
   async pipeLiveAbsoluteSegment(userId: string, streamId: string, u: string, res: any) {
-    const { baseUrl, user, pass } = await this.getXtreamBase(userId);
+    const { baseUrl } = await this.getXtreamBase(userId);
     const url = new URL(u);
     const base = new URL(baseUrl);
     if (url.host !== base.host) throw new BadRequestException('Host non autorisé');
-    const okPath =
-      url.pathname.includes(`/live/${encodeURIComponent(user)}/${encodeURIComponent(pass)}/${encodeURIComponent(streamId)}`) ||
-      url.pathname.includes(`/live/${user}/${pass}/${streamId}`);
-    if (!okPath) throw new BadRequestException('Chemin non autorisé');
+
+    // Autoriser les chemins HLS communs (live/, play/, hls/, etc.)
+    const allowed =
+      url.pathname.startsWith('/live/') ||
+      url.pathname.startsWith('/play/') ||
+      url.pathname.startsWith('/hls') ||
+      url.pathname.endsWith('.m3u8') ||
+      url.pathname.endsWith('.ts');
+    if (!allowed) throw new BadRequestException('Chemin non autorisé');
 
     const upstream = await axios.get(url.toString(), {
       responseType: 'stream',
@@ -376,17 +383,18 @@ export class VodService {
     upstream.data.pipe(res);
   }
 
-  // gère un chemin relatif imbriqué (ex: "720p/seg-001.ts" ou "index_1_0.m3u8")
+  // Chemin relatif imbriqué (ex: "720p/seg-001.ts")
   async pipeLiveRelativePath(userId: string, streamId: string, assetPath: string, res: any) {
     const { baseUrl, user, pass } = await this.getXtreamBase(userId);
 
-    // Normaliser/assainir le chemin (retirer "/" en tête, empêcher "..")
-    const safe = String(assetPath || '').replace(/^\/+/, '');
+    // décoder et assainir
+    const decoded = decodeURIComponent(String(assetPath || ''));
+    const safe = decoded.replace(/^\/+/, '');
     if (safe.includes('..')) throw new BadRequestException('Chemin non autorisé');
 
-    const upstream = `${baseUrl}/live/${encodeURIComponent(user)}/${encodeURIComponent(pass)}/${encodeURIComponent(streamId)}/${safe}`;
+    const upstreamPath = `${baseUrl}/live/${encodeURIComponent(user)}/${encodeURIComponent(pass)}/${encodeURIComponent(streamId)}/${encodeURI(safe)}`;
 
-    const r = await axios.get(upstream, {
+    const r = await axios.get(upstreamPath, {
       responseType: 'stream',
       timeout: 15000,
       validateStatus: (s) => s >= 200 && s < 500,
@@ -397,19 +405,14 @@ export class VodService {
     });
     if (r.status >= 400) throw new BadRequestException(`Upstream ${r.status}`);
 
-    // CORS pour le front
     res.setHeader('Access-Control-Allow-Origin', '*');
 
-    // Content-Type (si amont ne le met pas)
     const ct = (r.headers['content-type'] as string) || '';
     if (ct) {
       res.setHeader('Content-Type', ct);
     } else {
-      if (safe.endsWith('.m3u8')) {
-        res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
-      } else if (safe.endsWith('.ts')) {
-        res.setHeader('Content-Type', 'video/mp2t');
-      }
+      if (safe.endsWith('.m3u8')) res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+      else if (safe.endsWith('.ts')) res.setHeader('Content-Type', 'video/mp2t');
     }
 
     r.data.pipe(res);
