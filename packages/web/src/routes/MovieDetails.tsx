@@ -12,8 +12,7 @@ export default function MovieDetails() {
     let mounted = true;
     (async () => {
       try {
-        // Compatible avec l’alias /vod/movies/:id
-        const d = await api(`/vod/movies/${id}`);
+        const d = await api(`/vod/movies/${id}`); // alias vers details
         if (!mounted) return;
         setDetails(d);
       } catch (e: any) {
@@ -38,7 +37,6 @@ export default function MovieDetails() {
 
   return (
     <div style={{ display:'grid', gap:16 }}>
-      {/* Header */}
       <div style={{ display:'grid', gridTemplateColumns:'240px 1fr', gap:16 }}>
         <div style={{ width:240, borderRadius:12, overflow:'hidden', border:'1px solid #222', background:'#111' }}>
           <div style={{
@@ -54,6 +52,7 @@ export default function MovieDetails() {
           <div style={{ opacity:0.85, marginBottom:8 }}>
             {details.rating ? `Note : ${details.rating}/10` : '—'}
             {details.released ? ` · Sortie: ${details.released}` : ''}
+            {details.genres?.length ? ` · ${details.genres.join(' · ')}` : ''}
           </div>
           <p style={{ opacity:0.9 }}>{details.description || 'Aucune description'}</p>
           <div style={{ display:'flex', gap:8, marginTop:12 }}>
@@ -65,7 +64,6 @@ export default function MovieDetails() {
         </div>
       </div>
 
-      {/* Player */}
       {playing && (
         <div style={{ border:'1px solid #222', borderRadius:12, overflow:'hidden', background:'#000' }}>
           <div style={{ padding:'8px 12px', borderBottom:'1px solid #222', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
@@ -75,6 +73,7 @@ export default function MovieDetails() {
           <video
             controls
             autoPlay
+            playsInline
             style={{ width:'100%', height:'min(70vh, 720px)', background:'#000' }}
             src={playing.url}
           />
