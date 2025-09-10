@@ -1,11 +1,12 @@
+// packages/api/src/app.module.ts
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { PlaylistsModule } from './modules/playlists/playlists.module';
 import { VodModule } from './modules/vod/vod.module';
 import { LiveModule } from './modules/live/live.module';
-import { ContentModule } from './modules/content/content.module';
 
 @Module({
   imports: [
@@ -13,15 +14,16 @@ import { ContentModule } from './modules/content/content.module';
       type: 'postgres',
       url: process.env.DATABASE_URL,
       autoLoadEntities: true,
+      // IMPORTANT: on désactive la synchro auto pour éviter les ALTER TABLE surprises
       synchronize: false,
-      logging: ['error"],
+      // Logs TypeORM (optionnel) — ne touche pas aux logs Nest ici
+      logging: ['error'], // 'query' | 'error' | 'schema' | 'warn' | 'info' | 'log' | 'migration'
     }),
     AuthModule,
     UsersModule,
     PlaylistsModule,
     VodModule,
     LiveModule,
-    ContentModule, // <= NEW
   ],
 })
 export class AppModule {}
