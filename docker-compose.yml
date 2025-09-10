@@ -1,94 +1,80 @@
-version: "3.9"
+version: "3.8"
 
 services:
-  postgres:
+  db:
     image: postgres:15-alpine
-    container_name: iptv-saas-postgres
-    restart: unless-stopped
+    container_name: iptv-saas-db
     environment:
-      POSTGRES_DB: novastream
-      POSTGRES_USER: novastream
-      POSTGRES_PASSWORD: novastream
+      POSTGRES_USER: iptv
+      POSTGRES_PASSWORD: iptv
+      POSTGRES_DB: iptv
+    ports:
+      - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - db_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U novastream -d novastream"]
+      test: ["CMD-SHELL", "pg_isready -U iptv -d iptv || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
     container_name: iptv-saas-redis
-    restart: unless-stopped
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
 
   api:
     build:
       context: ./packages/api
-      dockerfile: Dockerfile
     container_name: iptv-saas-api
-    restart: unless-stopped
     depends_on:
-      postgres:
+      db:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
     environment:
       NODE_ENV: production
-      PORT: "3000"
-      DATABASE_URL: postgresql://novastream:novastream@postgres:5432/novastream
-      REDIS_URL: redis://redis:6379/0
-      JWT_ACCESS_SECRET: "dev_access_secret_change_me"
-      JWT_REFRESH_SECRET: "dev_refresh_secret_change_me"
-      CORS_ORIGIN: "http://85.31.239.110:5173"
-      TMDB_API_KEY: "d8175301037c00f3c719478998396539"
-      # Commente ces 4 lignes si tu ne veux pas de MinIO:
-      S3_ENDPOINT: "http://minio:9000"
-      S3_BUCKET: "novastream"
-      S3_ACCESS_KEY: "admin"
-      S3_SECRET_KEY: "changeme123"
+      # ✅ Ton secret JWT (garde bien les quotes !)
+      JWT_SECRET: '6#mVB0LwG26uQ8|tGyP:'
+      # TypeORM / DB
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: iptv
+      DB_USER: iptv
+      DB_PASSWORD: iptv
+      DATABASE_URL: postgres://iptv:iptv@db:5432/iptv
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      # (ajoute ici d’autres vars si ton AppModule les lit)
     ports:
       - "3000:3000"
+    restart: unless-stopped
 
   web:
     build:
       context: ./packages/web
-      dockerfile: Dockerfile
     container_name: iptv-saas-web
-    restart: unless-stopped
-    environment:
-      VITE_API_BASE: "http://85.31.239.110:3000"
     depends_on:
       - api
+    environment:
+      # Le front doit appeler l’API publique
+      VITE_API_BASE: "http://85.31.239.110:3000"
     ports:
       - "5173:5173"
-
-  # MinIO optionnel (commente si inutile)
-  minio:
-    image: quay.io/minio/minio:RELEASE.2024-07-26T20-48-21Z
-    container_name: iptv-saas-minio
     restart: unless-stopped
-    command: server --console-address ":9001" /data
-    environment:
-      MINIO_ROOT_USER: admin
-      MINIO_ROOT_PASSWORD: changeme123
-    volumes:
-      - minio-data:/data
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/ready"]
-      interval: 15s
-      timeout: 5s
-      retries: 10
 
 volumes:
-  pgdata:
-  minio-data:
+  db_data:
+  redis_data:
