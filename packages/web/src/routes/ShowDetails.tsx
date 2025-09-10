@@ -28,6 +28,11 @@ export default function ShowDetails() {
   const [playUrl, setPlayUrl] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
+  // Guard: si pas d'id dans l'URL
+  if (!seriesId) {
+    return <div style={{ padding: 16, color:'#fff' }}>ID de série manquant.</div>;
+  }
+
   useEffect(() => {
     let mounted = true;
     const load = async () => {
@@ -36,7 +41,6 @@ export default function ShowDetails() {
       if (!mounted) return;
       setInfo(i);
       setSeasons(s);
-      // pré-sélection premier épisode si dispo
       const first = s?.seasons?.[0]?.episodes?.[0];
       if (first) setCurrentEpisodeId(first.id);
     };
@@ -69,7 +73,10 @@ export default function ShowDetails() {
       }
     };
 
-    const onLoaded = () => attachReporter();
+    const onLoaded = () => {
+      attachReporter();
+      video.play().catch(() => {});
+    };
 
     if (Hls.isSupported()) {
       hls = new Hls({ enableWorker: true });
@@ -83,7 +90,7 @@ export default function ShowDetails() {
       video.src = playUrl;
     }
 
-    if (video.readyState >= 1) attachReporter();
+    if (video.readyState >= 1) onLoaded();
     video.addEventListener('loadedmetadata', onLoaded);
 
     return () => {
@@ -93,16 +100,16 @@ export default function ShowDetails() {
     };
   }, [seriesId, currentEpisodeId, playUrl]);
 
-  if (!info) return <div style={{ padding: 16 }}>Chargement…</div>;
+  if (!info) return <div style={{ padding: 16, color:'#fff' }}>Chargement…</div>;
 
   return (
     <div style={{ padding: 16, color: '#fff' }}>
       <h1 style={{ marginBottom: 8 }}>{info.title}</h1>
-      {info.rating != null && <div style={{ opacity: 0.8 }}>Note: {info.rating}</div>}
+      {info.rating != null && <div style={{ opacity:0.8 }}>Note: {info.rating}</div>}
       {info.genres && info.genres.length > 0 && (
-        <div style={{ opacity: 0.8, marginTop: 4 }}>{info.genres.join(' • ')}</div>
+        <div style={{ opacity:0.8, marginTop:4 }}>{info.genres.join(' • ')}</div>
       )}
-      {info.description && <p style={{ marginTop: 12, maxWidth: 800, lineHeight: 1.5 }}>{info.description}</p>}
+      {info.description && <p style={{ marginTop:12, maxWidth:800, lineHeight:1.5 }}>{info.description}</p>}
 
       <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 16, marginTop: 20 }}>
         <div style={{ maxHeight: 520, overflow: 'auto', border: '1px solid #222', borderRadius: 8 }}>
