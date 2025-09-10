@@ -1,106 +1,85 @@
 import React from 'react';
-import { useParams } from 'react-router-dom';
 import { api } from '../lib/api';
-
-type MovieDetail = {
-  id: string | number;
-  title: string | null;
-  year: number | null;
-  plot: string | null;
-  rating: number | null;
-  poster: string | null;
-  backdrop: string | null;
-  stream_url: string;
-  tmdb_id?: number;
-  source: 'XTREAM' | 'M3U';
-};
+import { useParams } from 'react-router-dom';
 
 export default function MovieDetails() {
   const { id } = useParams<{ id: string }>();
-  const [data, setData] = React.useState<MovieDetail | null>(null);
-  const [loading, setLoading] = React.useState(true);
+  const [details, setDetails] = React.useState<any>(null);
   const [err, setErr] = React.useState('');
-  const [play, setPlay] = React.useState(false);
+  const [playing, setPlaying] = React.useState<{ url: string } | null>(null);
 
-  async function load() {
-    if (!id) return;
-    setLoading(true); setErr('');
+  React.useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        // Compatible avec l’alias /vod/movies/:id
+        const d = await api(`/vod/movies/${id}`);
+        if (!mounted) return;
+        setDetails(d);
+      } catch (e: any) {
+        setErr(e?.message || 'Erreur');
+      }
+    })();
+    return () => { mounted = false; };
+  }, [id]);
+
+  async function play() {
+    setErr('');
     try {
-      const res = await api(`/vod/movies/${encodeURIComponent(id)}`);
-      setData(res as MovieDetail);
+      const res = await api(`/vod/movies/${id}/url`);
+      setPlaying({ url: res.url });
     } catch (e: any) {
-      setErr(e.message || 'Erreur');
-    } finally {
-      setLoading(false);
+      setErr(e?.message || 'Impossible de lancer la lecture');
     }
   }
 
-  React.useEffect(() => { load(); }, [id]);
-
-  if (loading) return <p>Chargement…</p>;
-  if (err) return <div><p style={{color:'#f66'}}>Erreur : {err}</p><button onClick={load}>Réessayer</button></div>;
-  if (!data) return <p>Introuvable.</p>;
+  if (err) return <div style={{ color:'#ff7b7b' }}>{err}</div>;
+  if (!details) return <div>Chargement…</div>;
 
   return (
     <div style={{ display:'grid', gap:16 }}>
-      {/* Hero */}
-      <div style={{
-        position:'relative',
-        borderRadius:16,
-        overflow:'hidden',
-        border:'1px solid #222',
-        background:'#0e0e0e',
-        minHeight:200
-      }}>
-        {data.backdrop ? (
-          <img src={data.backdrop} alt="" style={{ width:'100%', height:260, objectFit:'cover', opacity:.35 }} />
-        ) : null}
-        <div style={{ position:'absolute', inset:0, display:'flex', gap:16, padding:16 }}>
-          {data.poster ? (
-            <img src={data.poster} alt={data.title ?? ''} style={{ width:160, height:240, objectFit:'cover', borderRadius:12, border:'1px solid #333' }}/>
-          ) : (
-            <div style={{ width:160, height:240, background:'#1a1a1a', borderRadius:12, border:'1px solid #333' }} />
-          )}
-          <div style={{ display:'grid', alignContent:'center', gap:8 }}>
-            <h1 style={{ margin:0 }}>{data.title || 'Sans titre'}</h1>
-            <div style={{ opacity:.8 }}>
-              {data.year ? <span>{data.year} · </span> : null}
-              {typeof data.rating === 'number' ? <span>TMDB {Number(data.rating).toFixed(1)}/10</span> : null}
-              {(!data.year && data.rating==null) ? <span>—</span> : null}
-            </div>
-            {data.plot ? <p style={{ maxWidth:700, margin:0, opacity:.9 }}>{data.plot}</p> : <p style={{opacity:.7}}>Aucune description.</p>}
-            <div style={{ display:'flex', gap:8 }}>
-              <button onClick={() => setPlay(true)} style={{ padding:'8px 12px', borderRadius:8, border:'1px solid #333', background:'#fff', color:'#000', fontWeight:600 }}>
-                ▶️ Lire
-              </button>
-              {data.tmdb_id ? (
-                <a href={`https://www.themoviedb.org/movie/${data.tmdb_id}`} target="_blank" rel="noreferrer"
-                   style={{ padding:'8px 12px', borderRadius:8, border:'1px solid #333', color:'#fff' }}>
-                  Voir sur TMDB
-                </a>
-              ) : null}
-            </div>
+      {/* Header */}
+      <div style={{ display:'grid', gridTemplateColumns:'240px 1fr', gap:16 }}>
+        <div style={{ width:240, borderRadius:12, overflow:'hidden', border:'1px solid #222', background:'#111' }}>
+          <div style={{
+            aspectRatio:'2/3',
+            backgroundImage: details.poster ? `url(${details.poster})` : undefined,
+            backgroundSize:'cover', backgroundPosition:'center'
+          }} />
+        </div>
+        <div>
+          <h2 style={{ margin:'0 0 8px' }}>
+            {details.title}{details.year ? ` · ${details.year}` : ''}
+          </h2>
+          <div style={{ opacity:0.85, marginBottom:8 }}>
+            {details.rating ? `Note : ${details.rating}/10` : '—'}
+            {details.released ? ` · Sortie: ${details.released}` : ''}
+          </div>
+          <p style={{ opacity:0.9 }}>{details.description || 'Aucune description'}</p>
+          <div style={{ display:'flex', gap:8, marginTop:12 }}>
+            <button onClick={play}
+                    style={{ padding:'10px 14px', borderRadius:8, border:'1px solid #333', background:'#fff', color:'#000', fontWeight:700 }}>
+              ▶ Lire le film
+            </button>
           </div>
         </div>
       </div>
 
-      {/* Lecteur */}
-      {play ? (
+      {/* Player */}
+      {playing && (
         <div style={{ border:'1px solid #222', borderRadius:12, overflow:'hidden', background:'#000' }}>
+          <div style={{ padding:'8px 12px', borderBottom:'1px solid #222', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+            <strong>Lecture</strong>
+            <button onClick={() => setPlaying(null)} style={{ padding:'6px 10px', borderRadius:8, border:'1px solid #333', background:'transparent', color:'#fff' }}>Fermer</button>
+          </div>
           <video
             controls
-            playsInline
-            crossOrigin="anonymous"
-            style={{ width:'100%', maxHeight: '70vh', background:'#000' }}
-            src={data.stream_url}
+            autoPlay
+            style={{ width:'100%', height:'min(70vh, 720px)', background:'#000' }}
+            src={playing.url}
           />
         </div>
-      ) : null}
-
-      {/* Debug simple */}
-      <div style={{ fontSize:12, opacity:.7 }}>
-        Source: {data.source} · URL: <code>{data.stream_url}</code>
-      </div>
+      )}
     </div>
   );
 }
