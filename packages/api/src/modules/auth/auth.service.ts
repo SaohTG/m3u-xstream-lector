@@ -1,4 +1,9 @@
-import { Injectable, UnauthorizedException, InternalServerErrorException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  UnauthorizedException,
+  InternalServerErrorException,
+  BadRequestException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -12,16 +17,26 @@ export class AuthService {
     private readonly jwt: JwtService,
   ) {}
 
-  async signup(email: string, password: string): Promise<{ token: string }> {
-    if (!email || !password) throw new BadRequestException('Email/mot de passe requis');
+  private normalizeEmail(email: string): string {
+    return email.trim().toLowerCase();
+  }
 
-    const existing = await this.users.findOne({ where: { email: email.toLowerCase() as any } });
+  async signup(email: string, password: string): Promise<{ token: string }> {
+    if (!email || !password) {
+      throw new BadRequestException('Email/mot de passe requis');
+    }
+
+    const norm = this.normalizeEmail(email);
+
+    // ✅ Un seul utilisateur (pas un tableau)
+    const existing = await this.users.findOne({ where: { email: norm } });
     if (existing) throw new BadRequestException('Email déjà utilisé');
 
-    const hash = await bcrypt.hash(password, 10);
+    const password_hash = await bcrypt.hash(password, 10);
+
     const user = this.users.create({
-      email: email.toLowerCase(),
-      password_hash: hash,
+      email: norm,
+      password_hash,
       created_at: new Date(),
     } as any);
 
@@ -30,7 +45,11 @@ export class AuthService {
     const secret = process.env.JWT_SECRET;
     if (!secret) throw new InternalServerErrorException('JWT_SECRET non configuré');
 
-    const token = await this.jwt.signAsync({ sub: user.id, email: user.email }, { secret, expiresIn: '7d' });
+    const token = await this.jwt.signAsync(
+      { sub: user.id, email: user.email },
+      { secret, expiresIn: '7d' },
+    );
+
     return { token };
   }
 
@@ -39,10 +58,10 @@ export class AuthService {
       throw new UnauthorizedException('Email ou mot de passe manquant');
     }
 
-    const user = await this.users.findOne({
-      where: { email: email.toLowerCase() as any },
-    });
+    const norm = this.normalizeEmail(email);
 
+    // ✅ Un seul utilisateur (pas un tableau)
+    const user = await this.users.findOne({ where: { email: norm } });
     if (!user || !user.password_hash) {
       throw new UnauthorizedException('Identifiants invalides');
     }
@@ -53,9 +72,7 @@ export class AuthService {
     }
 
     const secret = process.env.JWT_SECRET;
-    if (!secret) {
-      throw new InternalServerErrorException('JWT_SECRET non configuré');
-    }
+    if (!secret) throw new InternalServerErrorException('JWT_SECRET non configuré');
 
     const token = await this.jwt.signAsync(
       { sub: user.id, email: user.email },
