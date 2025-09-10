@@ -105,7 +105,6 @@ export class VodService {
     const base = this.xt(pl.base_url!, pl.username!, pl.password!);
 
     const items: RailItem[] = [];
-    // Pour limiter les appels, on résout série par série
     const bySeries: Record<string, typeof rows> = {};
     rows.forEach((r) => {
       const sid = String(r.series_id || 'unknown');
@@ -140,7 +139,7 @@ export class VodService {
           });
         });
       } catch {
-        // ignore série KO
+        // ignore
       }
     }
 
@@ -411,14 +410,14 @@ export class VodService {
     return rails;
   }
 
-  // ========= TV : URL directe (optionnel) =========
+  // ========= TV : URL directe =========
   async getLiveStreamUrl(userId: string, streamId: string) {
     const { baseUrl, user, pass } = await this.getXtreamBase(userId);
     const url = `${baseUrl}/live/${encodeURIComponent(user)}/${encodeURIComponent(pass)}/${encodeURIComponent(streamId)}.m3u8`;
     return { url };
   }
 
-  // ========= TV : Proxy HLS (manifeste + segments) =========
+  // ========= TV : Proxy HLS =========
   async getLiveHlsManifest(userId: string, streamId: string): Promise<string> {
     const { baseUrl, user, pass } = await this.getXtreamBase(userId);
     const upstreamBase = `${baseUrl}/live/${encodeURIComponent(user)}/${encodeURIComponent(pass)}/${encodeURIComponent(streamId)}`;
@@ -430,7 +429,7 @@ export class VodService {
       timeout: 15000,
       validateStatus: (s) => s >= 200 && s < 500,
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0',
         'Accept': '*/*',
       },
     });
@@ -451,7 +450,6 @@ export class VodService {
       return `/vod/live/${encodeURIComponent(streamId)}/hls/${encodeURI(raw)}`;
     };
 
-    // Réécriture des lignes + des URI dans #EXT-X-KEY et #EXT-X-MAP
     const rewritten = text
       .split('\n')
       .map((line) => {
@@ -461,8 +459,7 @@ export class VodService {
         if (l.startsWith('#EXT-X-KEY') || l.startsWith('#EXT-X-MAP')) {
           return line.replace(/URI="([^"]+)"/, (_m, g1) => `URI="${rewriteUri(g1)}"`);
         }
-
-        if (l.startsWith('#')) return line; // pragma/comment
+        if (l.startsWith('#')) return line;
         return rewriteUri(l);
       })
       .join('\n');
@@ -470,7 +467,6 @@ export class VodService {
     return rewritten;
   }
 
-  // ========= ABSOLU (seg?u=...) =========
   async pipeLiveAbsoluteSegment(userId: string, _streamId: string, u: string, res: any) {
     const { baseUrl } = await this.getXtreamBase(userId);
 
@@ -486,14 +482,12 @@ export class VodService {
 
     const base = new URL(baseUrl);
 
-    // Compare hostname (ignore port)
     const urlHost = url.hostname.toLowerCase();
     const baseHost = base.hostname.toLowerCase();
     if (urlHost !== baseHost) {
       throw new BadRequestException(`Host non autorisé: ${urlHost} != ${baseHost}`);
     }
 
-    // Whitelist chemins HLS
     const p = url.pathname;
     const allowed =
       p.startsWith('/live/') ||
@@ -512,13 +506,11 @@ export class VodService {
       timeout: 20000,
       validateStatus: (s) => s >= 200 && s < 500,
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0',
         'Accept': '*/*',
       },
     });
-    if (upstream.status >= 400) {
-      throw new BadRequestException(`Upstream ${upstream.status}`);
-    }
+    if (upstream.status >= 400) throw new BadRequestException(`Upstream ${upstream.status}`);
 
     res.setHeader('Access-Control-Allow-Origin', '*');
     if (upstream.headers['content-type']) {
@@ -527,7 +519,6 @@ export class VodService {
     upstream.data.pipe(res);
   }
 
-  // ========= RELATIF (wildcard + query) =========
   async pipeLiveRelativePath(
     userId: string,
     streamId: string,
@@ -537,12 +528,10 @@ export class VodService {
   ) {
     const { baseUrl, user, pass } = await this.getXtreamBase(userId);
 
-    // décoder et assainir
     const decoded = decodeURIComponent(String(assetPath || ''));
     const safe = decoded.replace(/^\/+/, '');
     if (safe.includes('..')) throw new BadRequestException('Chemin non autorisé');
 
-    // reconstruire la query (token etc.)
     const qs = new URLSearchParams();
     Object.entries(query || {}).forEach(([k, v]) => {
       if (Array.isArray(v)) v.forEach((vv) => qs.append(k, String(vv)));
@@ -557,7 +546,7 @@ export class VodService {
       timeout: 20000,
       validateStatus: (s) => s >= 200 && s < 500,
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0',
         'Accept': '*/*',
       },
     });
