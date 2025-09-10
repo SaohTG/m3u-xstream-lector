@@ -10,7 +10,7 @@ export class ReportProgressDto {
 
   @IsOptional()
   @IsString()
-  seriesId?: string; // conseillé pour EPISODE
+  seriesId?: string; // recommandé pour EPISODE
 
   @IsInt() @Min(0)
   position!: number; // s
