@@ -1,69 +1,83 @@
 import React from 'react';
 import { api } from '../lib/api';
 
-type Channel = {
-  id: string | number;
-  name: string;
-  logo?: string | null;
-  url?: string | null;
-};
-
 export default function Live() {
-  const [items, setItems] = React.useState<Channel[]>([]);
-  const [loading, setLoading] = React.useState(true);
-  const [err, setErr] = React.useState<string>('');
+  const [rails, setRails] = React.useState<any[]>([]);
+  const [err, setErr] = React.useState('');
+  const [playing, setPlaying] = React.useState<{ url: string; title: string } | null>(null);
 
-  async function load() {
-    setLoading(true);
+  React.useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const r = await api('/vod/live/rails');
+        if (mounted) setRails(r || []);
+      } catch (e: any) {
+        setErr(e?.message || 'Erreur');
+      }
+    })();
+    return () => { mounted = false; };
+  }, []);
+
+  async function playChannel(id: string, title: string) {
     setErr('');
     try {
-      const res = await api('/live/channels');
-      setItems(Array.isArray(res) ? res : []);
+      const res = await api(`/vod/live/${id}/url`);
+      setPlaying({ url: res.url, title });
     } catch (e: any) {
-      setErr(e.message || 'Erreur');
-    } finally {
-      setLoading(false);
+      setErr(e?.message || 'Impossible de lancer la chaîne');
     }
   }
 
-  React.useEffect(() => { load(); }, []);
-
-  if (loading) return <p>Chargement des chaînes…</p>;
-  if (err) return (
-    <div>
-      <p style={{ color: '#f66' }}>Erreur : {err}</p>
-      <button onClick={load}>Réessayer</button>
-    </div>
-  );
-  if (!items.length) return (
-    <div>
-      <p>Aucune chaîne trouvée. Vérifie ta playlist dans l’<a href="/onboarding">onboarding</a>.</p>
-      <button onClick={load}>Rafraîchir</button>
-    </div>
-  );
-
   return (
-    <section>
-      <h2 style={{ margin: '8px 0 12px' }}>TV en direct ({items.length})</h2>
-      <div style={{
-        display:'grid',
-        gridTemplateColumns:'repeat(auto-fill, minmax(140px,1fr))',
-        gap:12
-      }}>
-        {items.map(c => (
-          <article key={String(c.id)} style={{ background:'#121212', border:'1px solid #222', borderRadius:12, padding:10 }}>
-            <div style={{ aspectRatio:'16 / 9', background:'#191919', marginBottom:8, display:'flex',alignItems:'center',justifyContent:'center', overflow:'hidden' }}>
-              {c.logo
-                ? <img src={c.logo} alt={c.name} style={{ maxWidth:'100%', maxHeight:'100%' }} />
-                : <div style={{opacity:.6}}>{c.name}</div>}
-            </div>
-            <div style={{ fontWeight:600, lineHeight:1.2 }}>{c.name}</div>
-          </article>
-        ))}
-      </div>
-      <div style={{ marginTop:12 }}>
-        <button onClick={load}>Rafraîchir</button>
-      </div>
-    </section>
+    <div style={{ display:'grid', gap:20 }}>
+      {err ? <div style={{ color:'#ff7b7b' }}>{err}</div> : null}
+
+      {/* Player */}
+      {playing && (
+        <div style={{ border:'1px solid #222', borderRadius:12, overflow:'hidden', background:'#000' }}>
+          <div style={{ padding:'8px 12px', borderBottom:'1px solid #222', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+            <strong>{playing.title}</strong>
+            <button onClick={() => setPlaying(null)} style={{ padding:'6px 10px', borderRadius:8, border:'1px solid #333', background:'transparent', color:'#fff' }}>Fermer</button>
+          </div>
+          {/* HLS natif (Safari) — pour Chrome/Firefox on ajoutera hls.js si besoin */}
+          <video
+            controls
+            autoPlay
+            playsInline
+            style={{ width:'100%', height:'min(70vh, 720px)', background:'#000' }}
+            src={playing.url}
+            crossOrigin="anonymous"
+          />
+        </div>
+      )}
+
+      {/* Rails par catégories */}
+      {rails.map((rail) => (
+        <div key={rail.key}>
+          <h3 style={{ margin:'8px 0' }}>{rail.title}</h3>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px,1fr))', gap:12 }}>
+            {rail.items.map((ch: any) => (
+              <button
+                key={ch.id}
+                onClick={() => playChannel(ch.id, ch.title)}
+                style={{ textAlign:'left', background:'transparent', color:'#fff', border:'none', cursor:'pointer' }}
+                title="Lire la chaîne"
+              >
+                <div style={{ background:'#111', border:'1px solid #222', borderRadius:12, overflow:'hidden' }}>
+                  <div style={{
+                    aspectRatio:'16/9',
+                    background:'#222',
+                    backgroundImage: ch.poster ? `url(${ch.poster})` : undefined,
+                    backgroundSize:'cover', backgroundPosition:'center'
+                  }} />
+                  <div style={{ padding:8, fontSize:13 }}>{ch.title}</div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
