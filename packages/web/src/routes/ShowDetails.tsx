@@ -17,7 +17,10 @@ type Series = {
 
 type Seasons = {
   seriesId: string;
-  seasons: Array<{ season: number; episodes: Array<{ id: string; number: number; title: string }> }>;
+  seasons: Array<{
+    season: number;
+    episodes: Array<{ id: string; number: number; title: string }>;
+  }>;
 };
 
 export default function ShowDetails() {
@@ -26,15 +29,15 @@ export default function ShowDetails() {
   const [seasons, setSeasons] = useState<Seasons | null>(null);
   const [currentEpisodeId, setCurrentEpisodeId] = useState<string | null>(null);
   const [playUrl, setPlayUrl] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  // Guard: si pas d'id dans l'URL
-  if (!seriesId) {
-    return <div style={{ padding: 16, color:'#fff' }}>ID de série manquant.</div>;
-  }
+  if (!seriesId) return <div style={{ padding: 16, color: '#fff' }}>ID de série manquant.</div>;
 
+  // Charge infos + saisons
   useEffect(() => {
     let mounted = true;
+    setErr(null);
     const load = async () => {
       const i = await api(`/vod/shows/${encodeURIComponent(seriesId)}/details`);
       const s = await api(`/vod/shows/${encodeURIComponent(seriesId)}/seasons`);
@@ -44,26 +47,29 @@ export default function ShowDetails() {
       const first = s?.seasons?.[0]?.episodes?.[0];
       if (first) setCurrentEpisodeId(first.id);
     };
-    load().catch(console.error);
+    load().catch((e) => setErr(e?.message || String(e)));
     return () => { mounted = false; };
   }, [seriesId]);
 
+  // Charge l’URL de lecture de l’épisode sélectionné
   useEffect(() => {
     let mounted = true;
+    setPlayUrl(null);
     if (!currentEpisodeId) return;
-    api(`/episodes/${encodeURIComponent(currentEpisodeId)}/url`)
+    api(`/vod/episodes/${encodeURIComponent(currentEpisodeId)}/url`) // 👈 corrigé: préfixe /vod
       .then((r) => { if (mounted) setPlayUrl(r.url); })
-      .catch(console.error);
+      .catch((e) => setErr(e?.message || String(e)));
     return () => { mounted = false; };
   }, [currentEpisodeId]);
 
+  // Initialise HLS
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !playUrl || !currentEpisodeId) return;
     let hls: Hls | null = null;
     let cleanup: (() => void) | null = null;
 
-    const attachReporter = () => {
+    const onLoaded = () => {
       if (!cleanup) {
         cleanup = attachProgressReporter(video, {
           kind: 'EPISODE',
@@ -71,10 +77,6 @@ export default function ShowDetails() {
           seriesId,
         });
       }
-    };
-
-    const onLoaded = () => {
-      attachReporter();
       video.play().catch(() => {});
     };
 
@@ -100,25 +102,28 @@ export default function ShowDetails() {
     };
   }, [seriesId, currentEpisodeId, playUrl]);
 
-  if (!info) return <div style={{ padding: 16, color:'#fff' }}>Chargement…</div>;
+  if (err) return <div style={{ padding: 16, color: '#ff6b6b' }}>Erreur: {err}</div>;
+  if (!info) return <div style={{ padding: 16, color: '#fff' }}>Chargement…</div>;
 
   return (
     <div style={{ padding: 16, color: '#fff' }}>
       <h1 style={{ marginBottom: 8 }}>{info.title}</h1>
-      {info.rating != null && <div style={{ opacity:0.8 }}>Note: {info.rating}</div>}
+      {info.rating != null && <div style={{ opacity: 0.8 }}>Note: {info.rating}</div>}
       {info.genres && info.genres.length > 0 && (
-        <div style={{ opacity:0.8, marginTop:4 }}>{info.genres.join(' • ')}</div>
+        <div style={{ opacity: 0.8, marginTop: 4 }}>{info.genres.join(' • ')}</div>
       )}
-      {info.description && <p style={{ marginTop:12, maxWidth:800, lineHeight:1.5 }}>{info.description}</p>}
+      {info.description && (
+        <p style={{ marginTop: 12, maxWidth: 800, lineHeight: 1.5 }}>{info.description}</p>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 16, marginTop: 20 }}>
         <div style={{ maxHeight: 520, overflow: 'auto', border: '1px solid #222', borderRadius: 8 }}>
-          {seasons?.seasons?.map(sea => (
+          {seasons?.seasons?.map((sea) => (
             <div key={sea.season}>
               <div style={{ padding: '6px 10px', background: '#141414', borderBottom: '1px solid #222' }}>
                 Saison {sea.season}
               </div>
-              {sea.episodes.map(ep => (
+              {sea.episodes.map((ep) => (
                 <button
                   key={ep.id}
                   onClick={() => setCurrentEpisodeId(ep.id)}
@@ -131,7 +136,7 @@ export default function ShowDetails() {
                     background: currentEpisodeId === ep.id ? '#1f1f1f' : 'transparent',
                     color: '#fff',
                     cursor: 'pointer',
-                    borderBottom: '1px solid #222'
+                    borderBottom: '1px solid #222',
                   }}
                 >
                   E{String(ep.number).padStart(2, '0')} — {ep.title}
@@ -142,7 +147,11 @@ export default function ShowDetails() {
         </div>
 
         <div>
-          <video ref={videoRef} controls playsInline style={{ width: '100%', maxWidth: 1000, background: '#000' }} />
+          {!playUrl ? (
+            <div style={{ opacity: 0.8 }}>Sélectionnez un épisode…</div>
+          ) : (
+            <video ref={videoRef} controls playsInline style={{ width: '100%', maxWidth: 1000, background: '#000' }} />
+          )}
         </div>
       </div>
     </div>
