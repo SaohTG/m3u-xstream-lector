@@ -1,291 +1,13 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import axios from 'axios';
+import { Response } from 'express';
 import { PlaylistsService } from '../playlists/playlists.service';
-
-type RailItem = {
-  id: string;
-  title: string;
-  poster?: string | null;
-  year?: number | null;
-  category?: string | null;
-  added_at?: number | null;
-};
-type Rail = { key: string; title: string; items: RailItem[] };
 
 @Injectable()
 export class VodService {
   constructor(private readonly playlists: PlaylistsService) {}
 
-  // ----------------- FILMS : rails -----------------
-  async getMovieRails(userId: string): Promise<Rail[]> {
-    const pl = await this.playlists.getActiveForUser(userId);
-    if (!pl) throw new BadRequestException('Aucune source liée');
-
-    if (pl.type === 'XTREAM') {
-      const base = this.xt(pl.base_url!, pl.username!, pl.password!);
-      const [cats, list] = await Promise.all([
-        this.xtGet(base, { action: 'get_vod_categories' }),
-        this.xtGet(base, { action: 'get_vod_streams' }),
-      ]);
-
-      const catNames: Record<string, string> = {};
-      (cats || []).forEach((c: any) => (catNames[c.category_id] = c.category_name));
-
-      const rails: Rail[] = [];
-
-      // Récemment ajoutés
-      const recents = [...(list || [])]
-        .sort((a: any, b: any) => (b.added || 0) - (a.added || 0))
-        .slice(0, 30)
-        .map((m: any) => ({
-          id: String(m.stream_id),
-          title: String(m.name || '').trim(),
-          poster: m.stream_icon || null,
-          year: m.year ? Number(m.year) : null,
-          category: catNames[m.category_id] || null,
-          added_at: m.added ? Number(m.added) : null,
-        }));
-      rails.push({ key: 'recent', title: 'Récemment ajoutés', items: recents });
-
-      // Années récentes
-      for (let y = new Date().getFullYear(); y >= 2018; y--) {
-        const items = (list || [])
-          .filter((m: any) => Number(m.year) === y)
-          .slice(0, 30)
-          .map((m: any) => ({
-            id: String(m.stream_id),
-            title: String(m.name || '').trim(),
-            poster: m.stream_icon || null,
-            year: m.year ? Number(m.year) : null,
-            category: catNames[m.category_id] || null,
-            added_at: m.added ? Number(m.added) : null,
-          }));
-        if (items.length) rails.push({ key: `y-${y}`, title: `Films ${y}`, items });
-      }
-
-      // Par catégories
-      const byCat: Record<string, RailItem[]> = {};
-      (list || []).forEach((m: any) => {
-        const it: RailItem = {
-          id: String(m.stream_id),
-          title: String(m.name || '').trim(),
-          poster: m.stream_icon || null,
-          year: m.year ? Number(m.year) : null,
-          category: catNames[m.category_id] || null,
-          added_at: m.added ? Number(m.added) : null,
-        };
-        const key = it.category || 'Divers';
-        byCat[key] = byCat[key] || [];
-        byCat[key].push(it);
-      });
-      Object.keys(byCat).forEach((k) =>
-        rails.push({ key: `c-${k}`, title: k, items: byCat[k].slice(0, 30) }),
-      );
-
-      return rails;
-    }
-
-    // M3U : VOD rarement structurée → pas de rails par défaut
-    return [];
-  }
-
-  // ----------------- SÉRIES : rails -----------------
-  async getShowRails(userId: string): Promise<Rail[]> {
-    const pl = await this.playlists.getActiveForUser(userId);
-    if (!pl) throw new BadRequestException('Aucune source liée');
-
-    if (pl.type === 'XTREAM') {
-      const base = this.xt(pl.base_url!, pl.username!, pl.password!);
-      const [cats, list] = await Promise.all([
-        this.xtGet(base, { action: 'get_series_categories' }),
-        this.xtGet(base, { action: 'get_series' }),
-      ]);
-
-      const catNames: Record<string, string> = {};
-      (cats || []).forEach((c: any) => (catNames[c.category_id] = c.category_name));
-
-      const rails: Rail[] = [];
-      const recents = [...(list || [])]
-        .sort((a: any, b: any) => (b.added || 0) - (a.added || 0))
-        .slice(0, 30)
-        .map((s: any) => ({
-          id: String(s.series_id),
-          title: String(s.name || '').trim(),
-          poster: s.cover || null,
-          year: s.releaseDate ? Number(String(s.releaseDate).slice(0, 4)) : null,
-          category: catNames[s.category_id] || null,
-          added_at: s.added ? Number(s.added) : null,
-        }));
-      rails.push({ key: 'recent', title: 'Nouveautés séries', items: recents });
-
-      const byCat: Record<string, RailItem[]> = {};
-      (list || []).forEach((s: any) => {
-        const it: RailItem = {
-          id: String(s.series_id),
-          title: String(s.name || '').trim(),
-          poster: s.cover || null,
-          year: s.releaseDate ? Number(String(s.releaseDate).slice(0, 4)) : null,
-          category: catNames[s.category_id] || null,
-          added_at: s.added ? Number(s.added) : null,
-        };
-        const key = it.category || 'Divers';
-        byCat[key] = byCat[key] || [];
-        byCat[key].push(it);
-      });
-      Object.keys(byCat).forEach((k) =>
-        rails.push({ key: `c-${k}`, title: k, items: byCat[k].slice(0, 30) }),
-      );
-
-      return rails;
-    }
-
-    return [];
-  }
-
-  // ----------------- LIVE : rails -----------------
-  async getLiveRails(userId: string): Promise<Rail[]> {
-    const pl = await this.playlists.getActiveForUser(userId);
-    if (!pl) throw new BadRequestException('Aucune source liée');
-    if (pl.type !== 'XTREAM') return [];
-
-    const base = this.xt(pl.base_url!, pl.username!, pl.password!);
-    const [cats, list] = await Promise.all([
-      this.xtGet(base, { action: 'get_live_categories' }),
-      this.xtGet(base, { action: 'get_live_streams' }),
-    ]);
-
-    const catNames: Record<string, string> = {};
-    (cats || []).forEach((c: any) => (catNames[c.category_id] = c.category_name));
-
-    const byCat: Record<string, RailItem[]> = {};
-    (list || []).forEach((ch: any) => {
-      const it: RailItem = {
-        id: String(ch.stream_id),
-        title: String(ch.name || '').trim(),
-        poster: ch.stream_icon || null,
-        category: catNames[ch.category_id] || null,
-        added_at: ch.added ? Number(ch.added) : null,
-      };
-      const key = it.category || 'Divers';
-      byCat[key] = byCat[key] || [];
-      byCat[key].push(it);
-    });
-
-    const rails: Rail[] = [];
-    Object.keys(byCat).forEach((k) =>
-      rails.push({ key: `c-${k}`, title: k, items: byCat[k].slice(0, 30) }),
-    );
-    return rails;
-  }
-
-  // ----------------- Détails FILM + URL -----------------
-  async getMovieDetails(userId: string, movieId: string) {
-    const pl = await this.playlists.getActiveForUser(userId);
-    if (!pl) throw new BadRequestException('Aucune source liée');
-    if (pl.type !== 'XTREAM') throw new BadRequestException('Détail film disponible uniquement pour Xtream pour le moment.');
-
-    const base = this.xt(pl.base_url!, pl.username!, pl.password!);
-    const data = await this.xtGet(base, { action: 'get_vod_info', vod_id: movieId });
-    const info = data?.info || {};
-    return {
-      id: String(movieId),
-      title: String(info.name || info.title || '').trim(),
-      description: info.plot || '',
-      rating: typeof info.rating === 'number' ? info.rating : Number(info.rating || 0) || null,
-      poster: info.movie_image || info.cover || null,
-      backdrop: info.backdrop_path || null,
-      released: info.releasedate || null,
-      year: info.releasedate ? Number(String(info.releasedate).slice(0, 4)) : (info.year ? Number(info.year) : null),
-      genres: info.genre ? String(info.genre).split(',').map((s: string) => s.trim()).filter(Boolean) : [],
-      container_extension: info?.container_extension || null,
-    };
-  }
-
-  async getMovieStreamUrl(userId: string, movieId: string) {
-    const pl = await this.playlists.getActiveForUser(userId);
-    if (!pl) throw new BadRequestException('Aucune source liée');
-    if (pl.type !== 'XTREAM') throw new BadRequestException('Lecture films disponible uniquement pour Xtream pour le moment.');
-
-    const baseUrl = pl.base_url!.replace(/\/+$/, '');
-    let ext = 'mp4';
-    try {
-      const base = this.xt(pl.base_url!, pl.username!, pl.password!);
-      const data = await this.xtGet(base, { action: 'get_vod_info', vod_id: movieId });
-      ext = data?.info?.container_extension || 'mp4';
-    } catch {}
-    const url = `${baseUrl}/movie/${encodeURIComponent(pl.username!)}/${encodeURIComponent(pl.password!)}/${encodeURIComponent(movieId)}.${ext}`;
-    return { url };
-  }
-
-  // ----------------- Détails SÉRIE / SAISONS / URL épisode -----------------
-  async getSeriesDetails(userId: string, seriesId: string) {
-    const pl = await this.playlists.getActiveForUser(userId);
-    if (!pl) throw new BadRequestException('Aucune source liée');
-    if (pl.type !== 'XTREAM') throw new BadRequestException('Détail séries disponible uniquement pour Xtream pour le moment.');
-
-    const base = this.xt(pl.base_url!, pl.username!, pl.password!);
-    const data = await this.xtGet(base, { action: 'get_series_info', series_id: seriesId });
-    const info = data?.info || {};
-    return {
-      id: String(seriesId),
-      title: String(info.name || '').trim(),
-      description: info.plot || '',
-      rating: typeof info.rating === 'number' ? info.rating : Number(info.rating || 0) || null,
-      poster: info.cover || null,
-      backdrop: info.backdrop_path || info.movie_image || null,
-      released: info.releasedate || null,
-      genres: info.genre ? String(info.genre).split(',').map((s: string) => s.trim()).filter(Boolean) : [],
-    };
-  }
-
-  async getSeriesSeasons(userId: string, seriesId: string) {
-    const pl = await this.playlists.getActiveForUser(userId);
-    if (!pl) throw new BadRequestException('Aucune source liée');
-    if (pl.type !== 'XTREAM') throw new BadRequestException('Saisons/épisodes disponibles uniquement pour Xtream pour le moment.');
-
-    const base = this.xt(pl.base_url!, pl.username!, pl.password!);
-    const data = await this.xtGet(base, { action: 'get_series_info', series_id: seriesId });
-    const eps = data?.episodes || {};
-    const seasons: Array<{ season: number; episodes: Array<{ id: string; number: number; title: string; ext?: string | null; duration?: number | null; }> }> = [];
-
-    Object.keys(eps).sort((a, b) => Number(a) - Number(b)).forEach((s) => {
-      const seasonNum = Number(s);
-      const list = (eps[s] || []).map((e: any) => ({
-        id: String(e.id),
-        number: Number(e.episode_num || e.episode) || 0,
-        title: String(e.title || `Episode ${e.episode_num || e.episode || ''}`).trim(),
-        ext: e.container_extension || null,
-        duration: e.duration ? Number(e.duration) : null,
-      }));
-      seasons.push({ season: seasonNum, episodes: list });
-    });
-
-    return { seriesId: String(seriesId), seasons };
-  }
-
-  async getEpisodeStreamUrl(userId: string, episodeId: string) {
-    const pl = await this.playlists.getActiveForUser(userId);
-    if (!pl) throw new BadRequestException('Aucune source liée');
-    if (pl.type !== 'XTREAM') throw new BadRequestException('Lecture épisodes disponible uniquement pour Xtream pour le moment.');
-
-    const baseUrl = pl.base_url!.replace(/\/+$/, '');
-    const url = `${baseUrl}/series/${encodeURIComponent(pl.username!)}/${encodeURIComponent(pl.password!)}/${encodeURIComponent(episodeId)}.mp4`;
-    return { url };
-  }
-
-  // ----------------- URL LIVE -----------------
-  async getLiveStreamUrl(userId: string, streamId: string) {
-    const pl = await this.playlists.getActiveForUser(userId);
-    if (!pl) throw new BadRequestException('Aucune source liée');
-    if (pl.type !== 'XTREAM') throw new BadRequestException('Lecture live disponible uniquement pour Xtream pour le moment.');
-
-    const baseUrl = pl.base_url!.replace(/\/+$/, '');
-    // HLS par défaut (m3u8). Si ça ne lit pas sur Chrome, on ajoutera hls.js côté web.
-    const url = `${baseUrl}/live/${encodeURIComponent(pl.username!)}/${encodeURIComponent(pl.password!)}/${encodeURIComponent(streamId)}.m3u8`;
-    return { url };
-  }
-
-  // ----------------- Helpers Xtream -----------------
+  // -------- Helpers Xtream --------
   private xt(base: string, user: string, pass: string) {
     const u = new URL('/player_api.php', base);
     u.searchParams.set('username', user);
@@ -295,11 +17,93 @@ export class VodService {
   private async xtGet(base: URL, params: Record<string, string | number>) {
     const u = new URL(base.toString());
     Object.entries(params).forEach(([k, v]) => u.searchParams.set(k, String(v)));
-    const resp = await axios.get(u.toString(), {
+    const resp = await axios.get(u.toString(), { timeout: 15000, validateStatus: s => s >= 200 && s < 500 });
+    if (resp.status >= 400) throw new BadRequestException(`Xtream ${resp.status}`);
+    return resp.data;
+  }
+
+  private async getXtreamBase(userId: string) {
+    const pl = await this.playlists.getActiveForUser(userId);
+    if (!pl) throw new BadRequestException('Aucune source liée');
+    if (pl.type !== 'XTREAM') throw new BadRequestException('Live disponible uniquement pour Xtream pour le moment.');
+    const baseUrl = pl.base_url!.replace(/\/+$/, '');
+    return { baseUrl, user: pl.username!, pass: pl.password! };
+  }
+
+  // ================== Live HLS Proxy: manifeste ==================
+  async getLiveHlsManifest(userId: string, streamId: string): Promise<string> {
+    const { baseUrl, user, pass } = await this.getXtreamBase(userId);
+    const upstreamBase = `${baseUrl}/live/${encodeURIComponent(user)}/${encodeURIComponent(pass)}/${encodeURIComponent(streamId)}`;
+    const manifestUrl = `${upstreamBase}.m3u8`;
+
+    const resp = await axios.get(manifestUrl, {
+      responseType: 'text' as any, // axios v1: 'text'
+      transformResponse: (x) => x, // prévenir JSON parse
       timeout: 15000,
       validateStatus: (s) => s >= 200 && s < 500,
     });
-    if (resp.status >= 400) throw new BadRequestException(`Xtream ${resp.status}`);
-    return resp.data;
+    if (resp.status >= 400 || typeof resp.data !== 'string') {
+      throw new BadRequestException(`Upstream manifest ${resp.status}`);
+    }
+
+    const text: string = resp.data;
+    // Réécriture: lignes non-# (URI) -> proxifiées
+    const rewritten = text
+      .split('\n')
+      .map((line) => {
+        const l = line.trim();
+        if (!l || l.startsWith('#')) return line;
+        if (/^https?:\/\//i.test(l)) {
+          // URL absolue -> route seg absolu
+          return `/vod/live/${encodeURIComponent(streamId)}/hls/seg?u=${encodeURIComponent(l)}`;
+        }
+        // relatif -> route relative
+        return `/vod/live/${encodeURIComponent(streamId)}/hls/${encodeURIComponent(l)}`;
+      })
+      .join('\n');
+
+    return rewritten;
+  }
+
+  // ================== Live HLS Proxy: segment absolu ==================
+  async pipeLiveAbsoluteSegment(userId: string, streamId: string, u: string, res: Response) {
+    const { baseUrl, user, pass } = await this.getXtreamBase(userId);
+    // Sécurité minimale: l'URL absolue doit pointer sur le même host et bonne racine
+    const url = new URL(u);
+    const base = new URL(baseUrl);
+    if (url.host !== base.host) {
+      throw new BadRequestException('Host non autorisé');
+    }
+    if (!url.pathname.includes(`/live/${encodeURIComponent(user)}/${encodeURIComponent(pass)}/${encodeURIComponent(streamId)}`) &&
+        !url.pathname.includes(`/live/${user}/${pass}/${streamId}`)) {
+      throw new BadRequestException('Chemin non autorisé');
+    }
+
+    const upstream = await axios.get(url.toString(), {
+      responseType: 'stream',
+      timeout: 15000,
+      validateStatus: (s) => s >= 200 && s < 500,
+    });
+    if (upstream.status >= 400) {
+      throw new BadRequestException(`Upstream ${upstream.status}`);
+    }
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    if (upstream.headers['content-type']) res.setHeader('Content-Type', upstream.headers['content-type'] as string);
+    upstream.data.pipe(res);
+  }
+
+  // ================== Live HLS Proxy: segment / playlist relatif ==================
+  async pipeLiveRelative(userId: string, streamId: string, filename: string, res: Response) {
+    const { baseUrl, user, pass } = await this.getXtreamBase(userId);
+    const upstream = `${baseUrl}/live/${encodeURIComponent(user)}/${encodeURIComponent(pass)}/${encodeURIComponent(streamId)}/${filename}`;
+    const r = await axios.get(upstream, {
+      responseType: 'stream',
+      timeout: 15000,
+      validateStatus: (s) => s >= 200 && s < 500,
+    });
+    if (r.status >= 400) throw new BadRequestException(`Upstream ${r.status}`);
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    if (r.headers['content-type']) res.setHeader('Content-Type', r.headers['content-type'] as string);
+    r.data.pipe(res);
   }
 }
