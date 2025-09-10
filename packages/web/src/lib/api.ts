@@ -1,11 +1,16 @@
 // packages/web/src/lib/api.ts
-const API_BASE = (import.meta as any).env?.VITE_API_BASE || '';
+const API_BASE: string = (import.meta as any).env?.VITE_API_BASE || '';
+
+export function getApiBase(): string {
+  return API_BASE;
+}
 
 const TOKEN_KEY = 'novastream_token';
 
 export function getToken(): string | null {
   try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
 }
+
 export function setToken(token: string | null) {
   try {
     if (token) localStorage.setItem(TOKEN_KEY, token);
@@ -50,10 +55,9 @@ export async function api<T = any>(path: string, opts: ApiOptions = {}): Promise
     method: opts.method || (body ? 'POST' : 'GET'),
     headers,
     body,
-    credentials: 'include', // permet cookie si jamais on en utilise
+    credentials: 'include',
   });
 
-  // JSON si possible
   let data: any = null;
   const ct = res.headers.get('Content-Type') || '';
   if (ct.includes('application/json')) {
@@ -64,7 +68,7 @@ export async function api<T = any>(path: string, opts: ApiOptions = {}): Promise
 
   if (!res.ok) {
     if (res.status === 401 && !opts.ignoreAuthRedirect) {
-      // token invalide/expiré : on le purge et on renvoie vers /auth
+      // Token invalide/expiré -> purge + redirection
       setToken(null);
       if (location.pathname !== '/auth') {
         location.replace('/auth');
