@@ -1,4 +1,3 @@
-// packages/api/src/modules/auth/auth.service.ts
 import {
   Injectable,
   UnauthorizedException,
@@ -23,11 +22,13 @@ export class AuthService {
   }
 
   async signup(email: string, password: string): Promise<{ token: string }> {
-    if (!email || !password) throw new BadRequestException('Email/mot de passe requis');
+    if (!email || !password) {
+      throw new BadRequestException('Email/mot de passe requis');
+    }
 
     const norm = this.normalizeEmail(email);
 
-    // ✅ Un seul utilisateur
+    // ❗️UN SEUL utilisateur (pas find())
     const existing = await this.users.findOne({ where: { email: norm } });
     if (existing) throw new BadRequestException('Email déjà utilisé');
 
@@ -51,19 +52,23 @@ export class AuthService {
   }
 
   async login(email: string, password: string): Promise<{ token: string }> {
-    if (!email || !password) throw new UnauthorizedException('Email ou mot de passe manquant');
+    if (!email || !password) {
+      throw new UnauthorizedException('Email ou mot de passe manquant');
+    }
 
     const norm = this.normalizeEmail(email);
 
-    // ✅ Un seul utilisateur (PAS find())
-    // Tu peux aussi utiliser: await this.users.findOneBy({ email: norm })
+    // ❗️UN SEUL utilisateur (pas find())
+    // Variante possible: await this.users.findOneBy({ email: norm })
     const user = await this.users.findOne({ where: { email: norm } });
     if (!user || !user.password_hash) {
       throw new UnauthorizedException('Identifiants invalides');
     }
 
     const ok = await bcrypt.compare(password, user.password_hash);
-    if (!ok) throw new UnauthorizedException('Identifiants invalides');
+    if (!ok) {
+      throw new UnauthorizedException('Identifiants invalides');
+    }
 
     const secret = process.env.JWT_SECRET;
     if (!secret) throw new InternalServerErrorException('JWT_SECRET non configuré');
