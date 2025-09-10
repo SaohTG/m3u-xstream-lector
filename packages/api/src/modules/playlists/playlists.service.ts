@@ -1,6 +1,7 @@
+// packages/api/src/modules/playlists/playlists.service.ts
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, FindOptionsWhere } from 'typeorm';
 import { Playlist } from './playlist.entity';
 
 type PlaylistType = 'XTREAM' | 'M3U';
@@ -12,7 +13,7 @@ export class PlaylistsService {
     private readonly repo: Repository<Playlist>,
   ) {}
 
-  /** Sélection “active” côté app : on privilégie active/enabled/is_active s’ils existent, sinon la plus récente. */
+  /** Choisit une playlist "active" : si un flag (active/enabled/is_active) est présent → prioritaire, sinon la plus récente. */
   private pickActive(playlists: Playlist[]): Playlist | null {
     if (!playlists?.length) return null;
     const withFlag = playlists.find(
@@ -24,14 +25,14 @@ export class PlaylistsService {
     return withFlag || playlists[0];
   }
 
-  /** Playlist “active” pour un utilisateur (sans présumer des colonnes). */
+  /** Playlist “active” pour un utilisateur (ne présume pas des colonnes exactes de l’entité). */
   async getActiveForUser(userId: string): Promise<Playlist | null> {
+    const where = { user_id: userId } as unknown as FindOptionsWhere<Playlist>;
+    const order = { updated_at: 'DESC', created_at: 'DESC', id: 'DESC' } as any;
+
     const items = await this.repo.find({
-      // @ts-expect-error: user_id est bien une colonne de notre entité
-      where: { user_id: userId },
-      // on ordonne pour récupérer la plus récente si plusieurs
-      // @ts-expect-error: champs horodatage présents dans l’entité
-      order: { updated_at: 'DESC', created_at: 'DESC', id: 'DESC' },
+      where,
+      order,
       take: 50,
     });
     return this.pickActive(items);
@@ -39,9 +40,9 @@ export class PlaylistsService {
 
   /** Playlist “active” globale s’il n’y a pas d’utilisateur fourni. */
   private async getLatestActive(): Promise<Playlist | null> {
+    const order = { updated_at: 'DESC', created_at: 'DESC', id: 'DESC' } as any;
     const items = await this.repo.find({
-      // @ts-expect-error: champs horodatage présents dans l’entité
-      order: { updated_at: 'DESC', created_at: 'DESC', id: 'DESC' },
+      order,
       take: 50,
     });
     return this.pickActive(items);
@@ -59,13 +60,11 @@ export class PlaylistsService {
     if (!id) return null;
     if (/^https?:\/\//i.test(id)) return id;
 
-    // base64 -> URL ?
     try {
       const b = Buffer.from(id, 'base64').toString('utf8');
       if (/^https?:\/\//i.test(b)) return b;
     } catch {}
 
-    // decodeURIComponent -> URL ?
     try {
       const d = decodeURIComponent(id);
       if (/^https?:\/\//i.test(d)) return d;
@@ -84,7 +83,7 @@ export class PlaylistsService {
     const anyPl = pl as any;
     const type = String(anyPl.type || '').toUpperCase() as PlaylistType;
 
-    // champs possibles suivant tes versions: url/base_url/host/port/username/user/password/pass
+    // champs possibles: url/base_url/baseUrl/host(+port)/username/user/password/pass
     let base: string | undefined =
       anyPl.url || anyPl.base_url || anyPl.baseUrl || anyPl.host || undefined;
 
@@ -115,7 +114,6 @@ export class PlaylistsService {
 
     if (type === 'XTREAM') {
       if (!base || !user || !pass) throw new NotFoundException('Paramètres Xtream manquants');
-      // film en HLS (si le serveur le sert en m3u8)
       return `${base}/movie/${encodeURIComponent(user)}/${encodeURIComponent(pass)}/${encodeURIComponent(
         movieId,
       )}.m3u8`;
@@ -151,7 +149,6 @@ export class PlaylistsService {
     const decoded = this.tryDecodeUrlId(episodeId);
     if (decoded) return decoded;
 
-    // ✅ correction: parenthèses manquantes précédemment
     throw new NotFoundException('URL d’épisode introuvable');
   }
 
