@@ -1,63 +1,41 @@
-// Front helper API — stringifie automatiquement les bodies JSON
+const TOKEN_KEY = 'novastream_token';
 
-const API_BASE = (import.meta as any).env?.VITE_API_BASE || '';
-
-export function getToken(): string | null {
-  try { return localStorage.getItem('ns_token'); } catch { return null; }
+export function getToken() {
+  try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
+}
+export function setToken(t: string) {
+  try { localStorage.setItem(TOKEN_KEY, t); } catch {}
+}
+export function clearToken() {
+  try { localStorage.removeItem(TOKEN_KEY); } catch {}
 }
 
-export function setToken(t: string | null) {
-  try {
-    if (!t) localStorage.removeItem('ns_token');
-    else localStorage.setItem('ns_token', t);
-  } catch {}
-}
+const BASE: string =
+  ((import.meta as any).env?.VITE_API_BASE as string | undefined)?.replace(/\/+$/, '') || '';
 
-function isPlainJsonBody(v: any) {
-  if (!v) return false;
-  if (typeof v !== 'object') return false;
-  if (v instanceof FormData) return false;
-  if (v instanceof URLSearchParams) return false;
-  if (v instanceof Blob) return false;
-  if (v instanceof ArrayBuffer) return false;
-  return true; // objet JS simple -> à stringifier
-}
-
-export async function api(path: string, opts: RequestInit = {}) {
+export async function api(path: string, init: RequestInit = {}) {
   const token = getToken();
-
-  const init: RequestInit = { method: 'GET', ...opts };
-  const headers: Record<string, string> = { ...(init.headers as any) };
-
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-
-  let body = init.body as any;
-
-  // Stringify auto pour POST/PUT/PATCH/DELETE si body est un objet simple
-  const method = String(init.method || 'GET').toUpperCase();
-  if (method !== 'GET' && isPlainJsonBody(body)) {
-    body = JSON.stringify(body);
-    if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
+  const headers = new Headers(init.headers || {});
+  // Ajoute Content-Type si body stringifié
+  if (!headers.has('Content-Type') && typeof init.body === 'string') {
+    headers.set('Content-Type', 'application/json');
   }
+  if (token) headers.set('Authorization', `Bearer ${token}`);
 
-  const res = await fetch(API_BASE + path, {
-    ...init,
-    headers,
-    body,
-    mode: 'cors',
-    credentials: 'omit',
-  });
+  const url = BASE ? `${BASE}${path}` : path;
+  const res = await fetch(url, { ...init, headers, credentials: 'include' as any });
+  const text = await res.text();
 
-  const raw = await res.text();
+  // Essaie JSON sinon renvoie texte
   let data: any = null;
-  try { data = raw ? JSON.parse(raw) : null; } catch { data = raw; }
+  try { data = text ? JSON.parse(text) : null; } catch {
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText} – ${text}`);
+    return text;
+  }
 
-  if (res.status === 401) {
-    setToken(null);
-    throw new Error(`401 Unauthorized – ${typeof data === 'string' ? data : JSON.stringify(data)}`);
-  }
   if (!res.ok) {
-    throw new Error(`${res.status} ${res.statusText} – ${typeof data === 'string' ? data : JSON.stringify(data)}`);
+    const msg = data?.message ? (typeof data.message === 'string' ? data.message : JSON.stringify(data.message)) : res.statusText;
+    throw new Error(`${res.status} ${res.statusText} – ${msg}`);
   }
-  return data;
+  return data ?? {};
 }
