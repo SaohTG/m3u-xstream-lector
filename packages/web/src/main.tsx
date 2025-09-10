@@ -8,6 +8,7 @@ import Live from './routes/Live';
 import Onboarding from './routes/Onboarding';
 import Auth from './routes/Auth';
 import MovieDetails from './routes/MovieDetails';
+import ShowDetails from './routes/ShowDetails';
 import AppErrorBoundary from './AppErrorBoundary';
 import RequirePlaylist from './guards/RequirePlaylist';
 
@@ -19,7 +20,7 @@ function Protected({ children }: { children?: React.ReactNode }) {
 
 function Shell() {
   return (
-    <div style={{ minHeight: '100dvh', background: '#0b0b0b', color: '#fff' }}>
+    <div style={{ minHeight:'100dvh', background:'#0b0b0b', color:'#fff' }}>
       <header style={{ display:'flex', alignItems:'center', gap:16, padding:'12px 16px', borderBottom:'1px solid #222' }}>
         <div style={{ fontWeight:800 }}>NovaStream</div>
         <nav style={{ display:'flex', gap:12, fontSize:14 }}>
@@ -42,37 +43,23 @@ const router = createBrowserRouter([
   {
     element: <Shell />,
     children: [
-      // Onboarding accessible même sans playlist
       { path: '/onboarding', element: <Protected><Onboarding /></Protected> },
-
-      // Pages qui EXIGENT une playlist liée
       { path: '/movies', element: <Protected><RequirePlaylist><Movies /></RequirePlaylist></Protected> },
       { path: '/shows',  element: <Protected><RequirePlaylist><Shows /></RequirePlaylist></Protected> },
       { path: '/live',   element: <Protected><RequirePlaylist><Live /></RequirePlaylist></Protected> },
-
-      // Détail film
       { path: '/movie/:id', element: <Protected><RequirePlaylist><MovieDetails /></RequirePlaylist></Protected> },
+      { path: '/show/:id',  element: <Protected><RequirePlaylist><ShowDetails /></RequirePlaylist></Protected> },
     ]
   },
 ]);
 
-window.addEventListener('unhandledrejection', (e) => {
-  console.error('Unhandled promise rejection:', e.reason);
-});
-
 function App() { return <RouterProvider router={router} />; }
-
-const rootEl = document.getElementById('root');
-if (!rootEl) {
-  console.error('Élément #root introuvable dans index.html');
-} else {
-  ReactDOM.createRoot(rootEl).render(
-    <React.StrictMode>
-      <AppErrorBoundary>
-        <App />
-      </AppErrorBoundary>
-    </React.StrictMode>
-  );
-}
-
+const rootEl = document.getElementById('root')!;
+ReactDOM.createRoot(rootEl).render(
+  <React.StrictMode>
+    <AppErrorBoundary>
+      <App />
+    </AppErrorBoundary>
+  </React.StrictMode>
+);
 export default App;
