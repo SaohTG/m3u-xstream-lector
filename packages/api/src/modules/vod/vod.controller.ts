@@ -1,3 +1,4 @@
+// packages/api/src/modules/vod/vod.controller.ts
 import {
   Controller,
   Get,
@@ -17,23 +18,38 @@ export class VodController {
     private readonly jwt: JwtService,
   ) {}
 
-  /** Vérifie JWT via header ou query ?t= */
+  /** Récupère le JWT depuis Authorization, query ?t=, ou cookies */
   private requireAuth(req: any) {
+    const secret = process.env.JWT_SECRET || 'changeme';
     let token = '';
+
+    // 1) Authorization: Bearer ...
     const h = req.headers?.authorization;
-    if (h && typeof h === 'string' && h.toLowerCase().startsWith('bearer ')) token = h.slice(7);
-    if (!token && typeof req.query?.t === 'string') token = req.query.t;
+    if (h && typeof h === 'string' && /^bearer /i.test(h)) {
+      token = h.slice(7);
+    }
+
+    // 2) Query ?t=
+    if (!token && typeof req.query?.t === 'string') {
+      token = req.query.t;
+    }
+
+    // 3) Cookies (httpOnly côté API)
+    if (!token) {
+      const c = req.cookies || {};
+      token = c.token || c.access_token || '';
+    }
+
     if (!token) throw new UnauthorizedException('Missing token');
+
     try {
-      return this.jwt.verify(token, { secret: process.env.JWT_SECRET || 'changeme' });
+      return this.jwt.verify(token, { secret });
     } catch {
       throw new UnauthorizedException('Invalid token');
     }
   }
 
-  /** ----------- MOVIES (rails + details + HLS) ----------- */
-
-  // 👉 corrige ton 404
+  /** ----------- MOVIES ----------- */
   @Get('movies/rails')
   async movieRails(@Req() req: any) {
     const user = this.requireAuth(req);
@@ -55,8 +71,7 @@ export class VodController {
     res.send(text);
   }
 
-  /** ----------- EPISODES HLS ----------- */
-
+  /** ----------- EPISODES ----------- */
   @Get('episodes/:id/hls')
   async episodeHls(@Param('id') id: string, @Req() req: any, @Res() res: any) {
     this.requireAuth(req);
@@ -67,7 +82,6 @@ export class VodController {
   }
 
   /** ----------- PROXY SEGMENTS ----------- */
-
   @Get('proxy/seg')
   async proxySeg(@Query('u') u: string, @Req() req: any, @Res() res: any) {
     this.requireAuth(req);
