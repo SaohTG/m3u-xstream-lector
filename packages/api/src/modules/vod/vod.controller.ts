@@ -1,5 +1,4 @@
 import { Controller, Get, Param, Query, Req, Res, UseGuards } from '@nestjs/common';
-import { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { VodService } from './vod.service';
 
@@ -8,37 +7,78 @@ import { VodService } from './vod.service';
 export class VodController {
   constructor(private readonly vod: VodService) {}
 
-  // --- (tes routes films / séries / live rails & url habituelles restent ici) ---
+  // ---------- FILMS ----------
+  @Get('movies/rails')
+  moviesRails(@Req() req: any) {
+    return this.vod.getMovieRails(req.user.userId);
+  }
+  @Get('movies/sections')
+  moviesSections(@Req() req: any) {
+    return this.vod.getMovieRails(req.user.userId);
+  }
+  @Get('movies/:movieId')
+  movieDetailsAlias(@Req() req: any, @Param('movieId') movieId: string) {
+    return this.vod.getMovieDetails(req.user.userId, movieId);
+  }
+  @Get('movies/:movieId/details')
+  movieDetails(@Req() req: any, @Param('movieId') movieId: string) {
+    return this.vod.getMovieDetails(req.user.userId, movieId);
+  }
+  @Get('movies/:movieId/url')
+  movieUrl(@Req() req: any, @Param('movieId') movieId: string) {
+    return this.vod.getMovieStreamUrl(req.user.userId, movieId);
+  }
 
-  // ================== TV (Live) : Proxy HLS pour éviter CORS ==================
-  // Manifeste HLS proxifié et réécrit
+  // ---------- SÉRIES ----------
+  @Get('shows/rails')
+  showsRails(@Req() req: any) {
+    return this.vod.getShowRails(req.user.userId);
+  }
+  @Get('shows/sections')
+  showsSections(@Req() req: any) {
+    return this.vod.getShowRails(req.user.userId);
+  }
+  @Get('shows/:seriesId/details')
+  showDetails(@Req() req: any, @Param('seriesId') seriesId: string) {
+    return this.vod.getSeriesDetails(req.user.userId, seriesId);
+  }
+  @Get('shows/:seriesId/seasons')
+  showSeasons(@Req() req: any, @Param('seriesId') seriesId: string) {
+    return this.vod.getSeriesSeasons(req.user.userId, seriesId);
+  }
+  @Get('episodes/:episodeId/url')
+  episodeUrl(@Req() req: any, @Param('episodeId') episodeId: string) {
+    return this.vod.getEpisodeStreamUrl(req.user.userId, episodeId);
+  }
+
+  // ---------- TV (rails + proxy HLS sans CORS) ----------
+  @Get('live/rails')
+  liveRails(@Req() req: any) {
+    return this.vod.getLiveRails(req.user.userId);
+  }
+  @Get('live/sections')
+  liveSections(@Req() req: any) {
+    return this.vod.getLiveRails(req.user.userId);
+  }
+
+  // Manifeste HLS proxifié (réécrit) — pas de type Response pour éviter @types/express
   @Get('live/:streamId/hls.m3u8')
-  async liveHlsManifest(@Req() req: any, @Param('streamId') streamId: string, @Res() res: Response) {
+  async liveHlsManifest(@Req() req: any, @Param('streamId') streamId: string, @Res() res: any) {
     const text = await this.vod.getLiveHlsManifest(req.user.userId, streamId);
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.send(text);
   }
 
-  // Segment absolu (si le manifeste contenait des URLs absolues)
+  // Segment absolu
   @Get('live/:streamId/hls/seg')
-  async liveHlsSegAbs(
-    @Req() req: any,
-    @Param('streamId') streamId: string,
-    @Query('u') u: string,
-    @Res() res: Response,
-  ) {
+  async liveHlsSegAbs(@Req() req: any, @Param('streamId') streamId: string, @Query('u') u: string, @Res() res: any) {
     await this.vod.pipeLiveAbsoluteSegment(req.user.userId, streamId, u, res);
   }
 
-  // Segment / sous-manifeste relatif, p.ex. 599260.ts ou 720p.m3u8
+  // Segment / sous-playlist relative
   @Get('live/:streamId/hls/:filename')
-  async liveHlsSegRel(
-    @Req() req: any,
-    @Param('streamId') streamId: string,
-    @Param('filename') filename: string,
-    @Res() res: Response,
-  ) {
+  async liveHlsSegRel(@Req() req: any, @Param('streamId') streamId: string, @Param('filename') filename: string, @Res() res: any) {
     await this.vod.pipeLiveRelative(req.user.userId, streamId, filename, res);
   }
 }
