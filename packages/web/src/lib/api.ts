@@ -1,58 +1,77 @@
+// packages/web/src/lib/api.ts
+const API_BASE = (import.meta as any).env?.VITE_API_BASE || '';
+
 const TOKEN_KEY = 'novastream_token';
 
-export function getToken() {
+export function getToken(): string | null {
   try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
 }
-export function setToken(t: string) {
-  try { localStorage.setItem(TOKEN_KEY, t); } catch {}
-}
-export function clearToken() {
-  try { localStorage.removeItem(TOKEN_KEY); } catch {}
-}
-
-function computeDefaultBase(): string {
+export function setToken(token: string | null) {
   try {
-    const { protocol, hostname } = window.location;
-    return `${protocol}//${hostname}:3000`;
-  } catch {
-    return 'http://localhost:3000';
-  }
+    if (token) localStorage.setItem(TOKEN_KEY, token);
+    else localStorage.removeItem(TOKEN_KEY);
+  } catch {}
 }
 
-const ENV_BASE = ((import.meta as any).env?.VITE_API_BASE as string | undefined)?.replace(/\/+$/, '');
-const BASE: string = ENV_BASE || computeDefaultBase();
-export function getApiBase() { return BASE; } // 👈 helper exporté
+type ApiOptions = {
+  method?: string;
+  headers?: Record<string, string>;
+  body?: any;
+  ignoreAuthRedirect?: boolean;
+};
 
 export class ApiError extends Error {
   status: number;
-  data: any;
-  constructor(status: number, message: string, data?: any) {
-    super(message);
+  raw: any;
+  constructor(status: number, raw: any) {
+    super(`${status} ${raw?.error || raw?.message || 'Error'}`);
     this.status = status;
-    this.data = data;
+    this.raw = raw;
   }
 }
 
-export async function api(path: string, init: RequestInit = {}) {
+export async function api<T = any>(path: string, opts: ApiOptions = {}): Promise<T> {
+  const url = `${API_BASE}${path}`;
+  const headers: Record<string, string> = {
+    'Accept': 'application/json',
+    ...(opts.headers || {}),
+  };
+
   const token = getToken();
-  const headers = new Headers(init.headers || {});
-  if (!headers.has('Content-Type') && typeof init.body === 'string') {
-    headers.set('Content-Type', 'application/json');
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  let body: any = opts.body;
+  if (body && typeof body === 'object' && !(body instanceof FormData)) {
+    headers['Content-Type'] = headers['Content-Type'] || 'application/json';
+    body = JSON.stringify(body);
   }
-  if (token) headers.set('Authorization', `Bearer ${token}`);
 
-  const url = `${BASE}${path}`;
-  const res = await fetch(url, { ...init, headers });
-  const text = await res.text();
+  const res = await fetch(url, {
+    method: opts.method || (body ? 'POST' : 'GET'),
+    headers,
+    body,
+    credentials: 'include', // permet cookie si jamais on en utilise
+  });
 
+  // JSON si possible
   let data: any = null;
-  try { data = text ? JSON.parse(text) : null; } catch { /* texte brut */ }
+  const ct = res.headers.get('Content-Type') || '';
+  if (ct.includes('application/json')) {
+    try { data = await res.json(); } catch {}
+  } else {
+    try { data = await res.text(); } catch {}
+  }
 
   if (!res.ok) {
-    const msg = data?.message
-      ? (typeof data.message === 'string' ? data.message : JSON.stringify(data.message))
-      : res.statusText;
-    throw new ApiError(res.status, msg || `${res.status}`, data);
+    if (res.status === 401 && !opts.ignoreAuthRedirect) {
+      // token invalide/expiré : on le purge et on renvoie vers /auth
+      setToken(null);
+      if (location.pathname !== '/auth') {
+        location.replace('/auth');
+      }
+    }
+    throw new ApiError(res.status, data || { message: res.statusText });
   }
-  return data ?? text ?? {};
+
+  return data as T;
 }
