@@ -1,50 +1,43 @@
 import React from 'react';
 import { api } from '../lib/api';
-
-type Show = { id: string | number; title: string; poster?: string | null; plot?: string | null; };
-type Section = { key: string; title: string; items: Show[] };
+import { Link } from 'react-router-dom';
 
 export default function Shows() {
-  const [sections, setSections] = React.useState<Section[]>([]);
-  const [loading, setLoading] = React.useState(true);
+  const [rails, setRails] = React.useState<any[]>([]);
   const [err, setErr] = React.useState('');
 
-  async function load() {
-    setLoading(true); setErr('');
-    try {
-      const res = await api('/vod/shows/sections');
-      setSections(Array.isArray(res) ? res : []);
-    } catch (e:any) { setErr(e.message || 'Erreur'); }
-    finally { setLoading(false); }
-  }
-  React.useEffect(()=>{ load(); }, []);
+  React.useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const r = await api('/vod/shows/rails');
+        if (mounted) setRails(r || []);
+      } catch (e: any) {
+        setErr(e?.message || 'Erreur');
+      }
+    })();
+    return () => { mounted = false; };
+  }, []);
 
-  if (loading) return <p>Chargement des séries…</p>;
-  if (err) return <div><p style={{color:'#f66'}}>Erreur : {err}</p><button onClick={load}>Réessayer</button></div>;
-  if (!sections.length) return <div><p>Aucune série trouvée.</p><button onClick={load}>Rafraîchir</button></div>;
+  if (err) return <div style={{ color:'#ff7b7b' }}>{err}</div>;
 
   return (
-    <div style={{ display:'grid', gap:20 }}>
-      {sections.map(sec => (
-        <section key={sec.key}>
-          <h3 style={{ margin:'6px 0 8px' }}>{sec.title}</h3>
-          <div style={{ display:'flex', gap:12, overflowX:'auto', paddingBottom:4 }}>
-            {sec.items.map(s => (
-              <article key={String(s.id)} style={{ minWidth:180, width:180, background:'#121212', border:'1px solid #222', borderRadius:12, overflow:'hidden' }}>
-                <div style={{ aspectRatio:'16 / 9', background:'#1a1a1a' }}>
-                  {s.poster ? <img src={s.poster} alt={s.title} style={{ width:'100%', height:'100%', objectFit:'cover' }}/> :
-                    <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100%',opacity:.6}}>Aucune image</div>}
+    <div style={{ display:'grid', gap:24 }}>
+      {rails.map((rail) => (
+        <div key={rail.key}>
+          <h3 style={{ margin:'8px 0' }}>{rail.title}</h3>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px,1fr))', gap:12 }}>
+            {rail.items.map((s: any) => (
+              <Link key={s.id} to={`/show/${s.id}`} style={{ textDecoration:'none', color:'inherit' }}>
+                <div style={{ background:'#111', border:'1px solid #222', borderRadius:12, overflow:'hidden' }}>
+                  <div style={{ aspectRatio:'2/3', background:'#222', backgroundImage: s.poster ? `url(${s.poster})` : undefined, backgroundSize:'cover', backgroundPosition:'center' }} />
+                  <div style={{ padding:8, fontSize:13 }}>{s.title}</div>
                 </div>
-                <div style={{ padding:8 }}>
-                  <div style={{ fontWeight:600, lineHeight:1.2 }}>{s.title}</div>
-                  {s.plot ? <div style={{ opacity:.65, fontSize:12, marginTop:4, display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden' }}>{s.plot}</div> : null}
-                </div>
-              </article>
+              </Link>
             ))}
           </div>
-        </section>
+        </div>
       ))}
-      <div><button onClick={load}>Rafraîchir</button></div>
     </div>
   );
 }
