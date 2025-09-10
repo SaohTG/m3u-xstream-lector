@@ -12,22 +12,19 @@ export class VodController {
   moviesRails(@Req() req: any) {
     return this.vod.getMovieRails(req.user.userId);
   }
-  // Alias rétro-compat
-  @Get('movies/sections')
+  @Get('movies/sections') // alias rétro-compat
   moviesSections(@Req() req: any) {
     return this.vod.getMovieRails(req.user.userId);
   }
-  // ✅ Détails film (alias court et version explicite)
-  @Get('movies/:movieId')
+  @Get('movies/:movieId') // détails film (alias court)
   movieDetailsAlias(@Req() req: any, @Param('movieId') movieId: string) {
     return this.vod.getMovieDetails(req.user.userId, movieId);
   }
-  @Get('movies/:movieId/details')
+  @Get('movies/:movieId/details') // détails film explicite
   movieDetails(@Req() req: any, @Param('movieId') movieId: string) {
     return this.vod.getMovieDetails(req.user.userId, movieId);
   }
-  // ✅ URL de lecture film
-  @Get('movies/:movieId/url')
+  @Get('movies/:movieId/url') // URL de lecture film
   movieUrl(@Req() req: any, @Param('movieId') movieId: string) {
     return this.vod.getMovieStreamUrl(req.user.userId, movieId);
   }
@@ -37,7 +34,7 @@ export class VodController {
   showsRails(@Req() req: any) {
     return this.vod.getShowRails(req.user.userId);
   }
-  @Get('shows/sections')
+  @Get('shows/sections') // alias rétro-compat
   showsSections(@Req() req: any) {
     return this.vod.getShowRails(req.user.userId);
   }
@@ -54,13 +51,17 @@ export class VodController {
     return this.vod.getEpisodeStreamUrl(req.user.userId, episodeId);
   }
 
-  // ---------- TV ----------
+  // ---------- TV (Live) ----------
   @Get('live/rails')
   liveRails(@Req() req: any) {
     return this.vod.getLiveRails(req.user.userId);
   }
-  @Get('live/sections')
+  @Get('live/sections') // alias rétro-compat
   liveSections(@Req() req: any) {
     return this.vod.getLiveRails(req.user.userId);
+  }
+  @Get('live/:streamId/url') // ✅ URL de lecture de chaîne
+  liveUrl(@Req() req: any, @Param('streamId') streamId: string) {
+    return this.vod.getLiveStreamUrl(req.user.userId, streamId);
   }
 }
