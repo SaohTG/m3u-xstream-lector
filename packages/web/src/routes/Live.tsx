@@ -1,10 +1,14 @@
 import React from 'react';
-import { api } from '../lib/api';
+import { api, getToken } from '../lib/api';
 
 export default function Live() {
   const [rails, setRails] = React.useState<any[]>([]);
-  const [err, setErr] = React.useState('');
-  const [playing, setPlaying] = React.useState<{ url: string; title: string } | null>(null);
+  const [err, setErr] = React.useState<string>('');
+  const videoRef = React.useRef<HTMLVideoElement | null>(null);
+  const hlsRef = React.useRef<any>(null);
+  const [current, setCurrent] = React.useState<{ id: string; title: string } | null>(null);
+
+  const apiBase = (import.meta as any).env?.VITE_API_BASE || '';
 
   React.useEffect(() => {
     let mounted = true;
@@ -19,13 +23,60 @@ export default function Live() {
     return () => { mounted = false; };
   }, []);
 
+  React.useEffect(() => {
+    return () => {
+      if (hlsRef.current) {
+        hlsRef.current.destroy?.();
+        hlsRef.current = null;
+      }
+    };
+  }, []);
+
   async function playChannel(id: string, title: string) {
     setErr('');
-    try {
-      const res = await api(`/vod/live/${id}/url`);
-      setPlaying({ url: res.url, title });
-    } catch (e: any) {
-      setErr(e?.message || 'Impossible de lancer la chaîne');
+    setCurrent({ id, title });
+
+    const manifestUrl = `${apiBase}/vod/live/${encodeURIComponent(id)}/hls.m3u8`;
+
+    const video = videoRef.current!;
+    if (!video) return;
+
+    // Safari: HLS natif
+    if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      // On ne peut pas injecter l'Authorization header avec <video> natif.
+      // Mais nos endpoints proxy sont sur le même host:port API et acceptent Bearer via XHR -> on utilise hls.js pour tous les navigateurs pour uniformiser.
+    }
+
+    // hls.js fallback / standard (Chrome/Firefox/Edge)
+    const { default: Hls } = await import('hls.js');
+    if (Hls.isSupported()) {
+      // cleanup ancien lecteur
+      if (hlsRef.current) {
+        hlsRef.current.destroy?.();
+        hlsRef.current = null;
+      }
+      const token = getToken();
+      const hls = new Hls({
+        // on peut activer low-latency si besoin
+        // lowLatencyMode: true,
+        xhrSetup: (xhr: XMLHttpRequest) => {
+          if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+        },
+      });
+      hlsRef.current = hls;
+      hls.attachMedia(video);
+      hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+        hls.loadSource(manifestUrl);
+      });
+      hls.on(Hls.Events.ERROR, (_evt: any, data: any) => {
+        if (data?.fatal) {
+          setErr('Erreur de lecture HLS');
+        }
+      });
+    } else {
+      // Dernier fallback (rare): tenter source direct (ne passera pas l’Authorization)
+      video.src = manifestUrl;
+      video.play().catch(() => setErr('Impossible de démarrer la chaîne'));
     }
   }
 
@@ -34,23 +85,24 @@ export default function Live() {
       {err ? <div style={{ color:'#ff7b7b' }}>{err}</div> : null}
 
       {/* Player */}
-      {playing && (
-        <div style={{ border:'1px solid #222', borderRadius:12, overflow:'hidden', background:'#000' }}>
-          <div style={{ padding:'8px 12px', borderBottom:'1px solid #222', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-            <strong>{playing.title}</strong>
-            <button onClick={() => setPlaying(null)} style={{ padding:'6px 10px', borderRadius:8, border:'1px solid #333', background:'transparent', color:'#fff' }}>Fermer</button>
-          </div>
-          {/* HLS natif (Safari) — pour Chrome/Firefox on ajoutera hls.js si besoin */}
-          <video
-            controls
-            autoPlay
-            playsInline
-            style={{ width:'100%', height:'min(70vh, 720px)', background:'#000' }}
-            src={playing.url}
-            crossOrigin="anonymous"
-          />
+      <div style={{ border:'1px solid #222', borderRadius:12, overflow:'hidden', background:'#000' }}>
+        <div style={{ padding:'8px 12px', borderBottom:'1px solid #222', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+          <strong>{current?.title || 'Sélectionne une chaîne'}</strong>
+          {current && (
+            <button onClick={() => { setCurrent(null); if (videoRef.current) videoRef.current.pause(); }}
+                    style={{ padding:'6px 10px', borderRadius:8, border:'1px solid #333', background:'transparent', color:'#fff' }}>
+              Fermer
+            </button>
+          )}
         </div>
-      )}
+        <video
+          ref={videoRef}
+          controls
+          autoPlay
+          playsInline
+          style={{ width:'100%', height:'min(70vh, 720px)', background:'#000' }}
+        />
+      </div>
 
       {/* Rails par catégories */}
       {rails.map((rail) => (
