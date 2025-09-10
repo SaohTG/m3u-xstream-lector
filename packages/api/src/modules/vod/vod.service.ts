@@ -16,13 +16,14 @@ type Rail = { key: string; title: string; items: RailItem[] };
 export class VodService {
   constructor(private readonly playlists: PlaylistsService) {}
 
-  // ----------------- Helpers Xtream -----------------
+  // ========= Helpers Xtream =========
   private xt(base: string, user: string, pass: string) {
     const u = new URL('/player_api.php', base);
     u.searchParams.set('username', user);
     u.searchParams.set('password', pass);
     return u;
   }
+
   private async xtGet(base: URL, params: Record<string, string | number>) {
     const u = new URL(base.toString());
     Object.entries(params).forEach(([k, v]) => u.searchParams.set(k, String(v)));
@@ -33,6 +34,7 @@ export class VodService {
     if (resp.status >= 400) throw new BadRequestException(`Xtream ${resp.status}`);
     return resp.data;
   }
+
   private async getXtreamBase(userId: string) {
     const pl = await this.playlists.getActiveForUser(userId);
     if (!pl) throw new BadRequestException('Aucune source liée');
@@ -41,7 +43,7 @@ export class VodService {
     return { baseUrl, user: pl.username!, pass: pl.password! };
   }
 
-  // ----------------- FILMS : rails -----------------
+  // ========= FILMS =========
   async getMovieRails(userId: string): Promise<Rail[]> {
     const pl = await this.playlists.getActiveForUser(userId);
     if (!pl) throw new BadRequestException('Aucune source liée');
@@ -110,11 +112,10 @@ export class VodService {
       return rails;
     }
 
-    // M3U : la VOD est rarement structurée → pas de rails par défaut
+    // M3U : peu de VOD exploitable → rails vides par défaut
     return [];
   }
 
-  // ----------------- Détails FILM + URL -----------------
   async getMovieDetails(userId: string, movieId: string) {
     const pl = await this.playlists.getActiveForUser(userId);
     if (!pl) throw new BadRequestException('Aucune source liée');
@@ -153,7 +154,7 @@ export class VodService {
     return { url };
   }
 
-  // ----------------- SÉRIES : rails / détails / saisons / URL épisode -----------------
+  // ========= SÉRIES =========
   async getShowRails(userId: string): Promise<Rail[]> {
     const pl = await this.playlists.getActiveForUser(userId);
     if (!pl) throw new BadRequestException('Aucune source liée');
@@ -169,6 +170,7 @@ export class VodService {
       (cats || []).forEach((c: any) => (catNames[c.category_id] = c.category_name));
 
       const rails: Rail[] = [];
+
       const recents = [...(list || [])]
         .sort((a: any, b: any) => (b.added || 0) - (a.added || 0))
         .slice(0, 30)
@@ -266,7 +268,7 @@ export class VodService {
     return { url };
   }
 
-  // ----------------- LIVE : rails -----------------
+  // ========= TV : rails =========
   async getLiveRails(userId: string): Promise<Rail[]> {
     const pl = await this.playlists.getActiveForUser(userId);
     if (!pl) throw new BadRequestException('Aucune source liée');
@@ -302,14 +304,14 @@ export class VodService {
     return rails;
   }
 
-  // ----------------- LIVE : URL directe (optionnelle) -----------------
+  // ========= TV : URL directe (optionnel) =========
   async getLiveStreamUrl(userId: string, streamId: string) {
     const { baseUrl, user, pass } = await this.getXtreamBase(userId);
     const url = `${baseUrl}/live/${encodeURIComponent(user)}/${encodeURIComponent(pass)}/${encodeURIComponent(streamId)}.m3u8`;
     return { url };
   }
 
-  // ----------------- LIVE : Proxy HLS (manifeste + segments) -----------------
+  // ========= TV : Proxy HLS (manifeste + segments) =========
   async getLiveHlsManifest(userId: string, streamId: string): Promise<string> {
     const { baseUrl, user, pass } = await this.getXtreamBase(userId);
     const upstreamBase = `${baseUrl}/live/${encodeURIComponent(user)}/${encodeURIComponent(pass)}/${encodeURIComponent(streamId)}`;
@@ -320,22 +322,27 @@ export class VodService {
       transformResponse: (x) => x,
       timeout: 15000,
       validateStatus: (s) => s >= 200 && s < 500,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36',
+        'Accept': '*/*',
+      },
     });
     if (resp.status >= 400 || typeof resp.data !== 'string') {
       throw new BadRequestException(`Upstream manifest ${resp.status}`);
     }
 
     const text: string = resp.data;
+    // Réécriture: lignes non-# (URI) -> proxifiées
     const rewritten = text
       .split('\n')
       .map((line) => {
         const l = line.trim();
         if (!l || l.startsWith('#')) return line;
         if (/^https?:\/\//i.test(l)) {
-          // URL absolue -> proxifiée
+          // URL absolue -> route seg absolu
           return `/vod/live/${encodeURIComponent(streamId)}/hls/seg?u=${encodeURIComponent(l)}`;
         }
-        // relatif
+        // relatif -> route relative wildcard
         return `/vod/live/${encodeURIComponent(streamId)}/hls/${encodeURIComponent(l)}`;
       })
       .join('\n');
@@ -357,6 +364,10 @@ export class VodService {
       responseType: 'stream',
       timeout: 15000,
       validateStatus: (s) => s >= 200 && s < 500,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36',
+        'Accept': '*/*',
+      },
     });
     if (upstream.status >= 400) throw new BadRequestException(`Upstream ${upstream.status}`);
 
@@ -365,18 +376,42 @@ export class VodService {
     upstream.data.pipe(res);
   }
 
-  async pipeLiveRelative(userId: string, streamId: string, filename: string, res: any) {
+  // gère un chemin relatif imbriqué (ex: "720p/seg-001.ts" ou "index_1_0.m3u8")
+  async pipeLiveRelativePath(userId: string, streamId: string, assetPath: string, res: any) {
     const { baseUrl, user, pass } = await this.getXtreamBase(userId);
-    const upstream = `${baseUrl}/live/${encodeURIComponent(user)}/${encodeURIComponent(pass)}/${encodeURIComponent(streamId)}/${filename}`;
+
+    // Normaliser/assainir le chemin (retirer "/" en tête, empêcher "..")
+    const safe = String(assetPath || '').replace(/^\/+/, '');
+    if (safe.includes('..')) throw new BadRequestException('Chemin non autorisé');
+
+    const upstream = `${baseUrl}/live/${encodeURIComponent(user)}/${encodeURIComponent(pass)}/${encodeURIComponent(streamId)}/${safe}`;
+
     const r = await axios.get(upstream, {
       responseType: 'stream',
       timeout: 15000,
       validateStatus: (s) => s >= 200 && s < 500,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36',
+        'Accept': '*/*',
+      },
     });
     if (r.status >= 400) throw new BadRequestException(`Upstream ${r.status}`);
 
+    // CORS pour le front
     res.setHeader('Access-Control-Allow-Origin', '*');
-    if (r.headers['content-type']) res.setHeader('Content-Type', r.headers['content-type'] as string);
+
+    // Content-Type (si amont ne le met pas)
+    const ct = (r.headers['content-type'] as string) || '';
+    if (ct) {
+      res.setHeader('Content-Type', ct);
+    } else {
+      if (safe.endsWith('.m3u8')) {
+        res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+      } else if (safe.endsWith('.ts')) {
+        res.setHeader('Content-Type', 'video/mp2t');
+      }
+    }
+
     r.data.pipe(res);
   }
 }
