@@ -10,8 +10,27 @@ export function clearToken() {
   try { localStorage.removeItem(TOKEN_KEY); } catch {}
 }
 
-const BASE: string =
-  ((import.meta as any).env?.VITE_API_BASE as string | undefined)?.replace(/\/+$/, '') || '';
+function computeDefaultBase(): string {
+  try {
+    const { protocol, hostname } = window.location;
+    return `${protocol}//${hostname}:3000`; // fallback auto -> :3000
+  } catch {
+    return 'http://localhost:3000';
+  }
+}
+
+const ENV_BASE = ((import.meta as any).env?.VITE_API_BASE as string | undefined)?.replace(/\/+$/, '');
+const BASE: string = ENV_BASE || computeDefaultBase();
+
+export class ApiError extends Error {
+  status: number;
+  data: any;
+  constructor(status: number, message: string, data?: any) {
+    super(message);
+    this.status = status;
+    this.data = data;
+  }
+}
 
 export async function api(path: string, init: RequestInit = {}) {
   const token = getToken();
@@ -21,19 +40,18 @@ export async function api(path: string, init: RequestInit = {}) {
   }
   if (token) headers.set('Authorization', `Bearer ${token}`);
 
-  const url = BASE ? `${BASE}${path}` : path;
-  const res = await fetch(url, { ...init, headers }); // 👈 pas de credentials
+  const url = `${BASE}${path}`;
+  const res = await fetch(url, { ...init, headers });
   const text = await res.text();
 
   let data: any = null;
-  try { data = text ? JSON.parse(text) : null; } catch {
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText} – ${text}`);
-    return text;
-  }
+  try { data = text ? JSON.parse(text) : null; } catch { /* texte brut */ }
 
   if (!res.ok) {
-    const msg = data?.message ? (typeof data.message === 'string' ? data.message : JSON.stringify(data.message)) : res.statusText;
-    throw new Error(`${res.status} ${res.statusText} – ${msg}`);
+    const msg = data?.message
+      ? (typeof data.message === 'string' ? data.message : JSON.stringify(data.message))
+      : res.statusText;
+    throw new ApiError(res.status, msg || `${res.status}`, data);
   }
-  return data ?? {};
+  return data ?? text ?? {};
 }
