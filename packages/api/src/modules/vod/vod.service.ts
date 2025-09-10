@@ -330,29 +330,38 @@ export class VodService {
     const text: string = resp.data;
     const origin = new URL(baseUrl).origin;
 
-    // Réécriture :
-    // - URL absolue -> seg?u=...
-    // - Chemin commençant par "/" -> seg?u=origin + path
-    // - Chemin relatif -> wildcard /hls/<assetPath> (encodeURI conserve les "/")
+    const rewriteUri = (raw: string) => {
+      if (/^https?:\/\//i.test(raw)) {
+        return `/vod/live/${encodeURIComponent(streamId)}/hls/seg?u=${encodeURIComponent(raw)}`;
+      }
+      if (raw.startsWith('/')) {
+        return `/vod/live/${encodeURIComponent(streamId)}/hls/seg?u=${encodeURIComponent(origin + raw)}`;
+      }
+      return `/vod/live/${encodeURIComponent(streamId)}/hls/${encodeURI(raw)}`;
+    };
+
+    // Réécriture des lignes + des URI dans #EXT-X-KEY et #EXT-X-MAP
     const rewritten = text
       .split('\n')
       .map((line) => {
         const l = line.trim();
-        if (!l || l.startsWith('#')) return line;
-        if (/^https?:\/\//i.test(l)) {
-          return `/vod/live/${encodeURIComponent(streamId)}/hls/seg?u=${encodeURIComponent(l)}`;
+        if (!l) return line;
+
+        // Réécrire URI="..." dans KEY/MAP
+        if (l.startsWith('#EXT-X-KEY') || l.startsWith('#EXT-X-MAP')) {
+          return line.replace(/URI="([^"]+)"/, (_m, g1) => `URI="${rewriteUri(g1)}"`);
         }
-        if (l.startsWith('/')) {
-          return `/vod/live/${encodeURIComponent(streamId)}/hls/seg?u=${encodeURIComponent(origin + l)}`;
-        }
-        return `/vod/live/${encodeURIComponent(streamId)}/hls/${encodeURI(l)}`;
+
+        // Lignes playlist (URI simple)
+        if (l.startsWith('#')) return line; // commentaire/pragma non-URI
+        return rewriteUri(l);
       })
       .join('\n');
 
     return rewritten;
   }
 
-  // ========= PATCH: accepter host (sans port) + chemins /play/, /hls-nginx, etc. =========
+  // ========= ABSOLU (seg?u=...) =========
   async pipeLiveAbsoluteSegment(userId: string, streamId: string, u: string, res: any) {
     const { baseUrl } = await this.getXtreamBase(userId);
 
@@ -368,14 +377,14 @@ export class VodService {
 
     const base = new URL(baseUrl);
 
-    // Comparer sur hostname uniquement (ignore le port)
+    // Compare hostname (ignore port)
     const urlHost = url.hostname.toLowerCase();
     const baseHost = base.hostname.toLowerCase();
     if (urlHost !== baseHost) {
       throw new BadRequestException(`Host non autorisé: ${urlHost} != ${baseHost}`);
     }
 
-    // Autoriser chemins HLS courants
+    // Whitelist chemins HLS
     const p = url.pathname;
     const allowed =
       p.startsWith('/live/') ||
@@ -383,14 +392,15 @@ export class VodService {
       p.startsWith('/hls') ||
       p.startsWith('/hls-nginx') ||
       p.endsWith('.m3u8') ||
-      p.endsWith('.ts');
+      p.endsWith('.ts') ||
+      p.endsWith('.key');
     if (!allowed) {
       throw new BadRequestException(`Chemin non autorisé: ${p}`);
     }
 
     const upstream = await axios.get(url.toString(), {
       responseType: 'stream',
-      timeout: 15000,
+      timeout: 20000,
       validateStatus: (s) => s >= 200 && s < 500,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36',
@@ -408,8 +418,14 @@ export class VodService {
     upstream.data.pipe(res);
   }
 
-  // Chemin relatif imbriqué (ex: "720p/seg-001.ts")
-  async pipeLiveRelativePath(userId: string, streamId: string, assetPath: string, res: any) {
+  // ========= RELATIF (wildcard + query) =========
+  async pipeLiveRelativePath(
+    userId: string,
+    streamId: string,
+    assetPath: string,
+    query: Record<string, any>,
+    res: any,
+  ) {
     const { baseUrl, user, pass } = await this.getXtreamBase(userId);
 
     // décoder et assainir
@@ -417,11 +433,19 @@ export class VodService {
     const safe = decoded.replace(/^\/+/, '');
     if (safe.includes('..')) throw new BadRequestException('Chemin non autorisé');
 
-    const upstreamPath = `${baseUrl}/live/${encodeURIComponent(user)}/${encodeURIComponent(pass)}/${encodeURIComponent(streamId)}/${encodeURI(safe)}`;
+    // reconstruire la query (token etc.)
+    const qs = new URLSearchParams();
+    Object.entries(query || {}).forEach(([k, v]) => {
+      if (Array.isArray(v)) v.forEach((vv) => qs.append(k, String(vv)));
+      else if (v != null) qs.append(k, String(v));
+    });
+    const qstr = qs.toString();
 
-    const r = await axios.get(upstreamPath, {
+    const upstream = `${baseUrl}/live/${encodeURIComponent(user)}/${encodeURIComponent(pass)}/${encodeURIComponent(streamId)}/${encodeURI(safe)}${qstr ? `?${qstr}` : ''}`;
+
+    const r = await axios.get(upstream, {
       responseType: 'stream',
-      timeout: 15000,
+      timeout: 20000,
       validateStatus: (s) => s >= 200 && s < 500,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36',
@@ -438,6 +462,7 @@ export class VodService {
     } else {
       if (safe.endsWith('.m3u8')) res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
       else if (safe.endsWith('.ts')) res.setHeader('Content-Type', 'video/mp2t');
+      else if (safe.endsWith('.key')) res.setHeader('Content-Type', 'application/octet-stream');
     }
 
     r.data.pipe(res);
