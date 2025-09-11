@@ -1,9 +1,14 @@
 import { Injectable, UnauthorizedException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import * as bcrypt from 'bcryptjs'; // << bcryptjs
+import * as bcrypt from 'bcryptjs'; // pur JS, évite les soucis de build
 import { JwtService } from '@nestjs/jwt';
 import { User } from '../users/user.entity';
+
+function ensureUser(u: User | User[] | null | undefined): User {
+  if (!u) throw new UnauthorizedException('User not found');
+  return Array.isArray(u) ? u[0] : u;
+}
 
 @Injectable()
 export class AuthService {
@@ -14,12 +19,16 @@ export class AuthService {
 
   /** Inscription par email + mot de passe. Retourne un token JWT. */
   async signup(email: string, password: string) {
+    // IMPORTANT: findOne, pas find
     const exists = await this.users.findOne({ where: { email } as any });
     if (exists) throw new ConflictException('Email already registered');
 
     const password_hash = await bcrypt.hash(password, 10);
     const entity = this.users.create({ email, password_hash } as any);
-    const saved = await this.users.save(entity); // <- saved: User (pas un tableau)
+
+    // Ne pas faire save([entity]) !
+    const savedRaw = await this.users.save(entity as any);
+    const saved = ensureUser(savedRaw);
 
     const token = await this.signToken(saved);
     return { token };
@@ -29,9 +38,11 @@ export class AuthService {
   async validateUser(email: string, password: string): Promise<User> {
     const user = await this.users.findOne({ where: { email } as any });
     if (!user) throw new UnauthorizedException('Invalid credentials');
+
     const ok = await bcrypt.compare(password, user.password_hash);
     if (!ok) throw new UnauthorizedException('Invalid credentials');
-    return user; // <- un User, pas User[]
+
+    return user;
   }
 
   /** Connexion en une étape (email+password). */
@@ -42,8 +53,9 @@ export class AuthService {
   }
 
   /** Connexion quand on a déjà le User (ex: guard local). */
-  async login(user: User) {
-    const token = await this.signToken(user);
+  async login(user: User | User[]) {
+    const u = ensureUser(user);
+    const token = await this.signToken(u);
     return { token };
   }
 
