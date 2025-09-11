@@ -41,10 +41,9 @@ export class PlaylistsService {
       // désactiver les anciennes
       await this.repo.update({ user_id: userId } as any, { active: false } as any);
 
-      // ⚠️ typer l’argument de create pour éviter la surcharge “array”
       const payload: DeepPartial<Playlist> = {
         user_id: userId,
-        type: 'm3u',
+        type: 'M3U', // <<<<<< MAJUSCULES
         url,
         name: dto.name || 'M3U',
         active: true,
@@ -64,11 +63,11 @@ export class PlaylistsService {
       }
       await this.assertValidXtream(base_url, username, password);
 
-      await self.repo.update({ user_id: userId } as any, { active: false } as any);
+      await this.repo.update({ user_id: userId } as any, { active: false } as any); // << self -> this
 
       const payload: DeepPartial<Playlist> = {
         user_id: userId,
-        type: 'xtream',
+        type: 'XTREAM', // <<<<<< MAJUSCULES
         base_url,
         username,
         password,
