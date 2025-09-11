@@ -1,20 +1,9 @@
-// packages/api/src/modules/auth/auth.service.ts
-import {
-  Injectable,
-  UnauthorizedException,
-  InternalServerErrorException,
-  BadRequestException,
-} from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
+import { Injectable, UnauthorizedException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import * as bcrypt from 'bcryptjs';
+import * as bcrypt from 'bcrypt';
+import { JwtService } from '@nestjs/jwt';
 import { User } from '../users/user.entity';
-
-function ensureOne<T>(val: T | T[] | null | undefined): T | null {
-  if (Array.isArray(val)) return val[0] ?? null;
-  return (val ?? null) as T | null;
-}
 
 @Injectable()
 export class AuthService {
@@ -23,60 +12,57 @@ export class AuthService {
     private readonly jwt: JwtService,
   ) {}
 
-  private normalizeEmail(email: string): string {
-    return email.trim().toLowerCase();
-  }
-
-  private async findUserByEmail(normEmail: string): Promise<User | null> {
-    // Chemin standard (retourne User | null)
-    const u1 = await this.users.findOne({ where: { email: normEmail } as any });
-    if (u1) return u1;
-
-    // Fallback si du code/driver renvoie un tableau
-    const u2 = await this.users.find({ where: { email: normEmail } as any, take: 1 });
-    return ensureOne<User>(u2);
-  }
-
-  private async signToken(user: User): Promise<string> {
-    const secret = process.env.JWT_SECRET;
-    if (!secret) throw new InternalServerErrorException('JWT_SECRET non configuré');
-    return this.jwt.signAsync({ sub: user.id, email: user.email }, { secret, expiresIn: '7d' });
-  }
-
-  async signup(email: string, password: string): Promise<{ token: string }> {
-    if (!email || !password) throw new BadRequestException('Email/mot de passe requis');
-    const norm = this.normalizeEmail(email);
-
-    const existing = await this.findUserByEmail(norm);
-    if (existing) throw new BadRequestException('Email déjà utilisé');
+  /** Inscription par email + mot de passe. Retourne un token JWT. */
+  async signup(email: string, password: string) {
+    const exists = await this.users.findOne({ where: { email } as any });
+    if (exists) throw new ConflictException('Email already registered');
 
     const password_hash = await bcrypt.hash(password, 10);
-
-    const entity = this.users.create({
-      email: norm,
-      password_hash,
-      created_at: new Date(),
-    } as any);
-
+    const entity = this.users.create({ email, password_hash } as any);
     const saved = await this.users.save(entity);
-    const user = ensureOne<User>(saved as any);
-    if (!user) throw new InternalServerErrorException('Échec de création utilisateur');
 
+    const token = await this.signToken(saved);
+    return { token };
+  }
+
+  /** Valide les identifiants, renvoie l’entité User ou lève 401. */
+  async validateUser(email: string, password: string): Promise<User> {
+    const user = await this.users.findOne({ where: { email } as any });
+    if (!user) throw new UnauthorizedException('Invalid credentials');
+    const ok = await bcrypt.compare(password, user.password_hash);
+    if (!ok) throw new UnauthorizedException('Invalid credentials');
+    return user;
+  }
+
+  /**
+   * Connexion “classique” utilisée par certains contrôleurs:
+   * prend un User déjà validé et renvoie { token }.
+   */
+  async login(user: User) {
     const token = await this.signToken(user);
     return { token };
   }
 
-  async login(email: string, password: string): Promise<{ token: string }> {
-    if (!email || !password) throw new UnauthorizedException('Email ou mot de passe manquant');
-    const norm = this.normalizeEmail(email);
-
-    const user = await this.findUserByEmail(norm);
-    if (!user || !user.password_hash) throw new UnauthorizedException('Identifiants invalides');
-
-    const ok = await bcrypt.compare(password, user.password_hash);
-    if (!ok) throw new UnauthorizedException('Identifiants invalides');
-
+  /**
+   * Connexion en une étape (email+password) si le contrôleur préfère.
+   */
+  async loginWithCredentials(email: string, password: string) {
+    const user = await this.validateUser(email, password);
     const token = await this.signToken(user);
     return { token };
+  }
+
+  /** Signe un JWT compatible avec JwtStrategy (payload: { sub, email }). */
+  private async signToken(user: User): Promise<string> {
+    const payload = { sub: user.id, email: user.email };
+    return this.jwt.signAsync(payload, {
+      secret: process.env.JWT_SECRET!,
+      expiresIn: '7d',
+    });
+  }
+
+  /** Utilitaire : retrouve un utilisateur par email. */
+  async findByEmail(email: string): Promise<User | null> {
+    return this.users.findOne({ where: { email } as any });
   }
 }
