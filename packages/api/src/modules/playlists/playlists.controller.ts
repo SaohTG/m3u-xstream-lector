@@ -1,25 +1,32 @@
-import { Body, Controller, Delete, Get, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Delete, Req, UseGuards, UnauthorizedException } from '@nestjs/common';
+import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { PlaylistsService } from './playlists.service';
 import { LinkPlaylistDto } from './dto/link-playlist.dto';
 
-@Controller('playlists')
 @UseGuards(JwtAuthGuard)
+@Controller('playlists')
 export class PlaylistsController {
-  constructor(private readonly playlists: PlaylistsService) {}
+  constructor(private readonly svc: PlaylistsService) {}
 
   @Get('me')
-  async me(@Req() req: any) {
-    return this.playlists.getForUser(req.user.sub);
+  async me(@Req() req: Request) {
+    const uid = (req as any)?.user?.id || (req as any)?.user?.sub;
+    if (!uid) throw new UnauthorizedException('Missing user id');
+    return this.svc.getForUser(uid);
   }
 
   @Post('link')
-  async link(@Req() req: any, @Body() dto: LinkPlaylistDto) {
-    return this.playlists.link(req.user.sub, dto);
+  async link(@Req() req: Request, @Body() dto: LinkPlaylistDto) {
+    const uid = (req as any)?.user?.id || (req as any)?.user?.sub;
+    if (!uid) throw new UnauthorizedException('Missing user id');
+    return this.svc.link(uid, dto);
   }
 
   @Delete('unlink')
-  async unlink(@Req() req: any) {
-    return this.playlists.unlink(req.user.sub);
+  async unlink(@Req() req: Request) {
+    const uid = (req as any)?.user?.id || (req as any)?.user?.sub;
+    if (!uid) throw new UnauthorizedException('Missing user id');
+    return this.svc.unlink(uid);
   }
 }
