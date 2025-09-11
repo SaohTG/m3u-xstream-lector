@@ -1,17 +1,19 @@
+// packages/api/src/main.ts
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import helmet from 'helmet';
-import * as cookieParser from 'cookie-parser';
 import { ValidationPipe } from '@nestjs/common';
+
+// Utiliser require pour éviter les soucis d'interop ESM/CJS
+// (marche quel que soit ton tsconfig)
+const helmet = require('helmet');
+const cookieParser = require('cookie-parser');
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // Sécurité & parsing
   app.use(helmet());
   app.use(cookieParser());
 
-  // CORS pour le front (inclure d’autres origines si besoin)
   app.enableCors({
     origin: [
       'http://localhost:5173',
@@ -24,7 +26,6 @@ async function bootstrap() {
     exposedHeaders: ['Content-Disposition'],
   });
 
-  // Validation globale (DTOs)
   app.useGlobalPipes(
     new ValidationPipe({
       transform: true,
