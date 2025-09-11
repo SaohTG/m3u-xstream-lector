@@ -12,19 +12,17 @@ type LinkPlaylistDto = LinkM3UDto | LinkXtreamDto;
 export class PlaylistsService {
   private readonly logger = new Logger(PlaylistsService.name);
 
-  constructor(
-    @InjectRepository(Playlist) private readonly repo: Repository<Playlist>,
-  ) {}
+  constructor(@InjectRepository(Playlist) private readonly repo: Repository<Playlist>) {}
 
-  /** Retourne les playlists d'un user (actives + historiques) */
-  async getForUser(userId: string) {
+  /** Toutes les playlists d’un user */
+  async getForUser(userId: string): Promise<Playlist[]> {
     return this.repo.find({
       where: { user_id: userId } as any,
       order: { created_at: 'DESC' },
     });
   }
 
-  /** Playlist active pour un user (ou null) */
+  /** Playlist active d’un user */
   async getActiveForUser(userId: string): Promise<Playlist | null> {
     return this.repo.findOne({
       where: { user_id: userId, active: true } as any,
@@ -32,32 +30,38 @@ export class PlaylistsService {
     });
   }
 
-  /** Active une playlist (désactive l'ancienne) */
-  private async activateNew(userId: string, pl: Playlist) {
-    const cur = await this.getActiveForUser(userId);
-    if (cur) {
-      cur.active = false;
-      await this.repo.save(cur);
-    }
-    pl.active = true;
-    await this.repo.save(pl);
-    return pl;
+  /** Désactive toutes les playlists de l’utilisateur */
+  private async deactivateAll(userId: string): Promise<void> {
+    await this.repo
+      .createQueryBuilder()
+      .update(Playlist)
+      .set({ active: false })
+      .where('user_id = :userId', { userId })
+      .andWhere('active = :active', { active: true })
+      .execute();
+  }
+
+  /** Active la nouvelle playlist (désactive les autres) */
+  private async activateNew(userId: string, entity: Playlist): Promise<Playlist> {
+    await this.deactivateAll(userId);
+    entity.active = true;
+    return this.repo.save(entity); // <-- entity est un Playlist (pas un array)
   }
 
   /** Lier playlist M3U ou Xtream */
-  async link(userId: string, dto: LinkPlaylistDto) {
+  async link(userId: string, dto: LinkPlaylistDto): Promise<{ ok: true }> {
     if (!userId) throw new Error('userId manquant');
 
     if (dto.type === 'M3U') {
       const m3uUrl = this.normalizeM3UUrl(dto.url);
-      const pl = this.repo.create({
+      const entity: Playlist = this.repo.create({
         user_id: userId,
         type: 'M3U',
         url: m3uUrl,
         name: dto.name ?? 'M3U',
         active: true,
       } as any);
-      await this.activateNew(userId, pl);
+      await this.activateNew(userId, entity);
       this.logger.log(`M3U liée pour user=${userId}`);
       return { ok: true };
     }
@@ -65,32 +69,27 @@ export class PlaylistsService {
     // --- XTREAM ---
     const { base } = await this.assertValidXtream(dto.host, dto.username, dto.password);
 
-    // on convertit XTREAM => URL M3U compatible pipeline d’import
-    // (beaucoup de portails attendent type=m3u_plus & output=m3u8)
+    // Conversion XTREAM -> URL M3U (pipeline import unifié)
     const m3uUrl =
       `${base}/get.php?username=${encodeURIComponent(dto.username)}` +
       `&password=${encodeURIComponent(dto.password)}&type=m3u_plus&output=m3u8`;
 
-    const pl = this.repo.create({
+    const entity: Playlist = this.repo.create({
       user_id: userId,
-      type: 'M3U', // on importe toujours comme M3U pour factoriser
+      type: 'M3U', // on importe au format M3U
       url: m3uUrl,
       name: dto.name ?? `Xtream: ${stripProtocol(base)}`,
       active: true,
     } as any);
 
-    await this.activateNew(userId, pl);
+    await this.activateNew(userId, entity);
     this.logger.log(`XTREAM lié (converti M3U) pour user=${userId}`);
     return { ok: true };
   }
 
-  /** Délier : désactive la playlist active */
-  async unlink(userId: string) {
-    const cur = await this.getActiveForUser(userId);
-    if (cur) {
-      cur.active = false;
-      await this.repo.save(cur);
-    }
+  /** Délier (= désactiver la playlist active) */
+  async unlink(userId: string): Promise<{ ok: true }> {
+    await this.deactivateAll(userId);
     return { ok: true };
   }
 
@@ -118,7 +117,7 @@ export class PlaylistsService {
       maxRedirects: 0,
       headers: {
         'User-Agent': 'VLC/3.0.18 LibVLC/3.0.18',
-        'Accept': 'application/json, */*',
+        Accept: 'application/json, */*',
       },
       httpsAgent: new (require('https').Agent)({ rejectUnauthorized: false }),
       validateStatus: () => true,
@@ -126,7 +125,7 @@ export class PlaylistsService {
     return axios.get(url, cfg);
   }
 
-  /** Vérifie l’accessibilité Xtream, tente HTTP/HTTPS, gère WAF/403 */
+  /** Vérifie l’accessibilité Xtream (HTTP/HTTPS) et l’état du compte */
   private async assertValidXtream(hostRaw: string, username: string, password: string) {
     const allowWithout = (process.env.ALLOW_XTREAM_LINK_WITHOUT_VALIDATE ?? 'false') === 'true';
 
@@ -167,7 +166,7 @@ export class PlaylistsService {
     }
 
     if (allowWithout) {
-      this.logger.warn('assertValidXtream: validation échouée, ALLOW_XTREAM_LINK_WITHOUT_VALIDATE=true => on accepte');
+      this.logger.warn('assertValidXtream: validation échouée, ALLOW_XTREAM_LINK_WITHOUT_VALIDATE=true => acceptée');
       return { base: this.normalizeXtreamHost(hostRaw) };
     }
 
