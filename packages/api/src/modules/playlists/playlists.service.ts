@@ -28,7 +28,7 @@ export class PlaylistsService {
 
   /** Lier une playlist M3U ou Xtream (validation incluse) */
   async link(userId: string, dto: LinkPlaylistDto) {
-    // Back-compat (certains fronts envoient "url" au lieu de "m3u_url")
+    // Back-compat : certains fronts envoient "url" au lieu de "m3u_url"
     if (dto.type === 'm3u' && !dto.m3u_url && (dto as any).url) {
       dto.m3u_url = (dto as any).url;
     }
@@ -38,7 +38,7 @@ export class PlaylistsService {
       if (!url) throw new BadRequestException('m3u_url requis');
       await this.assertValidM3U(url);
 
-      // Désactiver toute playlist existante de l'utilisateur
+      // Désactiver toutes les playlists existantes de l'utilisateur
       await this.repo.update({ user_id: userId } as any, { active: false } as any);
 
       const entity: Playlist = this.repo.create({
@@ -50,8 +50,8 @@ export class PlaylistsService {
         created_at: new Date(),
       } as any);
 
-      // ⚠️ Typage explicite pour éviter l’inférence Playlist[]
-      const saved: Playlist = await this.repo.save(entity as Playlist);
+      // ⚠️ On force la surcharge "single entity" avec le générique <Playlist>
+      const saved = await this.repo.save<Playlist>(entity as any);
       return { ok: true, playlist_id: this.getPk(saved) };
     }
 
@@ -77,8 +77,8 @@ export class PlaylistsService {
         created_at: new Date(),
       } as any);
 
-      // ⚠️ Typage explicite
-      const saved: Playlist = await this.repo.save(entity as Playlist);
+      // ⚠️ idem : on typpe explicitement
+      const saved = await this.repo.save<Playlist>(entity as any);
       return { ok: true, playlist_id: this.getPk(saved) };
     }
 
