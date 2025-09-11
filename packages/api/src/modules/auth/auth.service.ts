@@ -1,3 +1,4 @@
+// packages/api/src/modules/auth/auth.service.ts
 import {
   Injectable,
   UnauthorizedException,
@@ -10,6 +11,11 @@ import { Repository } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
 import { User } from '../users/user.entity';
 
+function ensureOne<T>(val: T | T[] | null | undefined): T | null {
+  if (Array.isArray(val)) return val[0] ?? null;
+  return (val ?? null) as T | null;
+}
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -21,6 +27,16 @@ export class AuthService {
     return email.trim().toLowerCase();
   }
 
+  private async findUserByEmail(normEmail: string): Promise<User | null> {
+    // Chemin standard (retourne User | null)
+    const u1 = await this.users.findOne({ where: { email: normEmail } as any });
+    if (u1) return u1;
+
+    // Fallback si du code/driver renvoie un tableau
+    const u2 = await this.users.find({ where: { email: normEmail } as any, take: 1 });
+    return ensureOne<User>(u2);
+  }
+
   private async signToken(user: User): Promise<string> {
     const secret = process.env.JWT_SECRET;
     if (!secret) throw new InternalServerErrorException('JWT_SECRET non configuré');
@@ -29,20 +45,22 @@ export class AuthService {
 
   async signup(email: string, password: string): Promise<{ token: string }> {
     if (!email || !password) throw new BadRequestException('Email/mot de passe requis');
-
     const norm = this.normalizeEmail(email);
 
-    // ✅ Renvoie UN user (ou null), jamais un tableau
-    const existing = await this.users.findOneBy({ email: norm } as any);
+    const existing = await this.findUserByEmail(norm);
     if (existing) throw new BadRequestException('Email déjà utilisé');
 
     const password_hash = await bcrypt.hash(password, 10);
-    const user = this.users.create({
+
+    const entity = this.users.create({
       email: norm,
       password_hash,
       created_at: new Date(),
     } as any);
-    await this.users.save(user);
+
+    const saved = await this.users.save(entity);
+    const user = ensureOne<User>(saved as any);
+    if (!user) throw new InternalServerErrorException('Échec de création utilisateur');
 
     const token = await this.signToken(user);
     return { token };
@@ -50,11 +68,9 @@ export class AuthService {
 
   async login(email: string, password: string): Promise<{ token: string }> {
     if (!email || !password) throw new UnauthorizedException('Email ou mot de passe manquant');
-
     const norm = this.normalizeEmail(email);
 
-    // ✅ Renvoie UN user (ou null), jamais un tableau
-    const user = await this.users.findOneBy({ email: norm } as any);
+    const user = await this.findUserByEmail(norm);
     if (!user || !user.password_hash) throw new UnauthorizedException('Identifiants invalides');
 
     const ok = await bcrypt.compare(password, user.password_hash);
