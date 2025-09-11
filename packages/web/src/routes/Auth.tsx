@@ -1,171 +1,171 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, setToken } from '../lib/api';
+import { api, setToken, ApiError } from '../lib/api';
 
 export default function Auth() {
-  const nav = useNavigate();
-
   const [mode, setMode] = useState<'login' | 'signup'>('login');
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState('demo@novastream.app');
   const [password, setPassword] = useState('');
   const [showPwd, setShowPwd] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const navigate = useNavigate();
 
-  const submit = async (e: React.FormEvent) => {
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setErr(null);
+    setError(null);
     setLoading(true);
     try {
-      const path = mode === 'login' ? '/auth/login' : '/auth/signup';
-
-      const res = await api(path, {
-        method: 'POST',
-        body: JSON.stringify({ email, password }), // JSON correct
+      const endpoint = mode === 'signup' ? '/auth/signup' : '/auth/login';
+      const { token } = await api(endpoint, {
+        body: { email: email.trim(), password },
       });
-
-      // Accepte plusieurs formes de réponse (access_token|accessToken|token|jwt ou texte JWT)
-      const token =
-        res?.access_token ??
-        res?.accessToken ??
-        res?.token ??
-        res?.jwt ??
-        res?.data?.access_token ??
-        (typeof res === 'string' && /^eyJ[A-Za-z0-9_\-]+\./.test(res) ? res : null);
-
-      if (!token) {
-        // Aide au debug côté console
-        // eslint-disable-next-line no-console
-        console.debug('Réponse /auth:', res);
-        throw new Error('Token manquant');
-      }
-
       setToken(token);
-      nav('/onboarding', { replace: true });
-    } catch (e: any) {
-      setErr(e?.message || String(e));
+      navigate('/movies');
+    } catch (err: any) {
+      if (err instanceof ApiError) {
+        // Montre le message renvoyé par l’API si dispo
+        const msg =
+          Array.isArray(err.raw?.message)
+            ? err.raw.message.join(', ')
+            : err.raw?.message || `${err.status} ${err.raw?.error || 'Erreur'}`;
+        setError(msg);
+        console.error('Auth error:', err.status, err.raw);
+      } else {
+        setError('Erreur réseau');
+        console.error(err);
+      }
     } finally {
       setLoading(false);
     }
-  };
+  }
 
   return (
-    <div style={{ minHeight: '100dvh', display: 'grid', placeItems: 'center', background: '#0b0b0b', color: '#fff' }}>
-      <div style={{ width: '100%', maxWidth: 420, padding: 16 }}>
-        <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{ fontWeight: 800, fontSize: 20 }}>NovaStream</div>
-          <div style={{ opacity: 0.7, fontSize: 12 }}>— Authentification</div>
+    <div style={{ minHeight: '100dvh', background: '#0b0b0b', color: '#eee', display: 'grid', placeItems: 'center', padding: 16 }}>
+      <form
+        onSubmit={submit}
+        style={{
+          width: 420,
+          maxWidth: '95vw',
+          background: '#121212',
+          border: '1px solid #222',
+          borderRadius: 12,
+          padding: 20,
+          boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
+        }}
+      >
+        <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 12 }}>
+          NovaStream <span style={{ opacity: 0.7, fontWeight: 600 }}>— Authentification</span>
         </div>
 
-        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+        <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
           <button
             type="button"
-            onClick={() => { setMode('login'); setErr(null); }}
-            disabled={mode === 'login'}
+            onClick={() => setMode('login')}
             style={tabStyle(mode === 'login')}
           >
             Connexion
           </button>
           <button
             type="button"
-            onClick={() => { setMode('signup'); setErr(null); }}
-            disabled={mode === 'signup'}
+            onClick={() => setMode('signup')}
             style={tabStyle(mode === 'signup')}
           >
             Inscription
           </button>
         </div>
 
-        <form onSubmit={submit} style={{ display: 'grid', gap: 10 }}>
-          <label style={labelStyle}>
-            <div style={labelTextStyle}>Email</div>
-            <input
-              required
-              type="email"
-              placeholder="you@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              style={inputStyle}
-              autoComplete="username"
-            />
-          </label>
+        <label style={labelStyle}>Email</label>
+        <input
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="vous@exemple.com"
+          type="email"
+          required
+          style={inputStyle}
+        />
 
-          <label style={labelStyle}>
-            <div style={labelTextStyle}>Mot de passe</div>
-            <div style={{ position: 'relative' }}>
-              <input
-                required
-                type={showPwd ? 'text' : 'password'}
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                style={{ ...inputStyle, paddingRight: 84 }}
-                autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPwd((v) => !v)}
-                style={showBtnStyle}
-                title={showPwd ? 'Masquer' : 'Afficher'}
-              >
-                {showPwd ? 'Masquer' : 'Afficher'}
-              </button>
-            </div>
-          </label>
-
+        <label style={labelStyle}>Mot de passe</label>
+        <div style={{ position: 'relative' }}>
+          <input
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="••••••••"
+            type={showPwd ? 'text' : 'password'}
+            required
+            minLength={6}
+            style={{ ...inputStyle, paddingRight: 96 }}
+          />
           <button
-            type="submit"
-            disabled={loading}
-            style={{
-              background: '#fff',
-              color: '#000',
-              border: 'none',
-              borderRadius: 8,
-              padding: '10px 14px',
-              cursor: 'pointer',
-              fontWeight: 600,
-              opacity: loading ? 0.7 : 1,
-            }}
+            type="button"
+            onClick={() => setShowPwd((s) => !s)}
+            style={showBtnStyle}
           >
-            {loading ? '...' : mode === 'login' ? 'Se connecter' : 'Créer le compte'}
+            {showPwd ? 'Masquer' : 'Afficher'}
           </button>
+        </div>
 
-          {err && (
-            <div style={{ color: '#ff6b6b', fontSize: 13, marginTop: 6 }}>
-              {err}
-            </div>
-          )}
+        <button
+          type="submit"
+          disabled={loading}
+          style={{
+            width: '100%',
+            marginTop: 16,
+            padding: '10px 14px',
+            borderRadius: 8,
+            border: '1px solid #333',
+            background: '#fff',
+            color: '#000',
+            fontWeight: 700,
+            cursor: 'pointer',
+            opacity: loading ? 0.7 : 1,
+          }}
+        >
+          {mode === 'signup' ? 'Créer le compte' : 'Se connecter'}
+        </button>
 
-          <div style={{ fontSize: 12, opacity: 0.7, marginTop: 8, lineHeight: 1.5 }}>
-            En continuant, vous acceptez nos Conditions d’utilisation et notre Politique de confidentialité.
+        {error && (
+          <div style={{ color: '#ff6b6b', marginTop: 12, fontSize: 14 }}>
+            {error}
           </div>
-        </form>
-      </div>
+        )}
+
+        <p style={{ opacity: 0.6, fontSize: 12, marginTop: 16, lineHeight: 1.4 }}>
+          En continuant, vous acceptez nos Conditions d’utilisation et notre Politique de confidentialité.
+        </p>
+      </form>
     </div>
   );
 }
 
-/* ---------- styles utilitaires ---------- */
+/* styles utilitaires */
+function tabStyle(active: boolean): React.CSSProperties {
+  return {
+    flex: 1,
+    padding: '10px 12px',
+    borderRadius: 8,
+    border: '1px solid #333',
+    background: active ? '#2b2b2b' : '#181818',
+    color: active ? '#fff' : '#bbb',
+    fontWeight: 700,
+    cursor: 'pointer',
+  };
+}
 
-const tabStyle = (active: boolean): React.CSSProperties => ({
-  flex: 1,
-  background: active ? '#1f1f1f' : 'transparent',
-  color: '#fff',
-  border: '1px solid #333',
-  borderRadius: 8,
-  padding: '8px 10px',
-  cursor: active ? 'default' : 'pointer',
-});
-
-const labelStyle: React.CSSProperties = { display: 'grid', gap: 6 };
-const labelTextStyle: React.CSSProperties = { fontSize: 13, opacity: 0.85 };
+const labelStyle: React.CSSProperties = {
+  display: 'block',
+  marginTop: 10,
+  marginBottom: 6,
+  fontSize: 13,
+  opacity: 0.9,
+};
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
   padding: '10px 12px',
   borderRadius: 8,
   border: '1px solid #333',
-  background: '#121212',
+  background: '#0e0e0e',
   color: '#fff',
   outline: 'none',
 };
@@ -174,11 +174,11 @@ const showBtnStyle: React.CSSProperties = {
   position: 'absolute',
   right: 6,
   top: 6,
-  height: 30,
-  padding: '0 10px',
-  background: '#222',
-  color: '#fff',
-  border: '1px solid #333',
+  padding: '6px 10px',
   borderRadius: 6,
+  border: '1px solid #333',
+  background: '#1b1b1b',
+  color: '#ddd',
   cursor: 'pointer',
+  fontSize: 12,
 };
