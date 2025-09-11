@@ -1,43 +1,41 @@
-// packages/api/src/modules/playlists/playlist.entity.ts
-import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  Index,
+} from 'typeorm';
 
 export type PlaylistType = 'M3U' | 'XTREAM';
 
-@Entity({ name: 'playlists' })
+@Entity('playlists')
+@Index(['user_id', 'active'])
 export class Playlist {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column({ type: 'varchar', length: 64 })
+  @Column('uuid')
   user_id!: string;
 
-  @Column({ type: 'varchar', length: 10 })
-  type!: PlaylistType; // 'M3U' | 'XTREAM'
+  // on stocke le type d’origine (XTREAM ou M3U)
+  @Column({ type: 'varchar', length: 20, default: 'M3U' })
+  type!: PlaylistType;
 
-  // Pour M3U
-  @Column({ type: 'text', nullable: true })
-  url?: string | null;
+  // pour XTREAM, on convertit en URL M3U compatible import
+  @Column({ type: 'text' })
+  url!: string;
 
-  // Pour Xtream
-  @Column({ type: 'text', nullable: true })
-  base_url?: string | null;
+  // optionnel : nom affichable
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  name!: string | null;
 
-  @Column({ type: 'varchar', length: 128, nullable: true })
-  username?: string | null;
-
-  @Column({ type: 'varchar', length: 128, nullable: true })
-  password?: string | null;
-
-  // Nouveau: nom affiché dans l’UI (facultatif)
-  @Column({ type: 'varchar', length: 120, nullable: true })
-  name?: string | null;
-
-  @Column({ type: 'boolean', default: false })
+  @Column({ type: 'boolean', default: true })
   active!: boolean;
 
-  @CreateDateColumn({ type: 'timestamptz' })
+  @CreateDateColumn()
   created_at!: Date;
 
-  @UpdateDateColumn({ type: 'timestamptz' })
+  @UpdateDateColumn()
   updated_at!: Date;
 }
