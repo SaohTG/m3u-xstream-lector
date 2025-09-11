@@ -41,17 +41,17 @@ export class PlaylistsService {
       // Désactiver toutes les playlists existantes de l'utilisateur
       await this.repo.update({ user_id: userId } as any, { active: false } as any);
 
-      const entity: Playlist = this.repo.create({
+      // ⚠️ créer UNE entité (pas de crochets)
+      const entity = this.repo.create({
         user_id: userId,
         type: 'm3u',
         url,
         name: dto.name || 'M3U',
         active: true,
         created_at: new Date(),
-      } as any);
+      } as any) as Playlist;
 
-      // ⚠️ On force la surcharge "single entity" avec le générique <Playlist>
-      const saved = await this.repo.save<Playlist>(entity as any);
+      const saved = await this.repo.save(entity); // saved: Playlist
       return { ok: true, playlist_id: this.getPk(saved) };
     }
 
@@ -66,7 +66,8 @@ export class PlaylistsService {
 
       await this.repo.update({ user_id: userId } as any, { active: false } as any);
 
-      const entity: Playlist = this.repo.create({
+      // ⚠️ créer UNE entité (pas de crochets)
+      const entity = this.repo.create({
         user_id: userId,
         type: 'xtream',
         base_url,
@@ -75,10 +76,9 @@ export class PlaylistsService {
         name: dto.name || 'Xtream',
         active: true,
         created_at: new Date(),
-      } as any);
+      } as any) as Playlist;
 
-      // ⚠️ idem : on typpe explicitement
-      const saved = await this.repo.save<Playlist>(entity as any);
+      const saved = await this.repo.save(entity); // saved: Playlist
       return { ok: true, playlist_id: this.getPk(saved) };
     }
 
