@@ -1,11 +1,11 @@
-// Wrapper Fetch + gestion du token local + cookies
-// - Utilise VITE_API_BASE si défini (sinon IP/port par défaut)
-// - Ajoute automatiquement Authorization: Bearer <token> si présent
-// - Envoie toujours du JSON et inclut les cookies (credentials: 'include')
+// Wrapper Fetch + gestion du token + cookies
 
-const API_BASE =
-  (import.meta as any).env?.VITE_API_BASE ||
-  'http://85.31.239.110:3000';
+export const API_BASE =
+  (import.meta as any).env?.VITE_API_BASE || 'http://85.31.239.110:3000';
+
+export function getApiBase(): string {
+  return API_BASE;
+}
 
 const TOKEN_KEY = 'novastream_token';
 
@@ -59,18 +59,12 @@ export async function api(path: string, opts: ApiOptions = {}) {
     method: opts.method || (opts.body ? 'POST' : 'GET'),
     headers,
     body: opts.body ? JSON.stringify(opts.body) : undefined,
-    credentials: 'include', // pour cookie httpOnly
+    credentials: 'include',
   });
 
   if (opts.raw) return res;
 
-  const data = await res
-    .json()
-    .catch(() => ({} as any));
-
-  if (!res.ok) {
-    throw new ApiError(res.status, data);
-  }
-
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(res.status, data);
   return data;
 }
