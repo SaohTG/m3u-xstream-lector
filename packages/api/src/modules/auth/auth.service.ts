@@ -1,7 +1,7 @@
 import { Injectable, UnauthorizedException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import * as bcrypt from 'bcrypt';
+import * as bcrypt from 'bcryptjs'; // << bcryptjs
 import { JwtService } from '@nestjs/jwt';
 import { User } from '../users/user.entity';
 
@@ -19,7 +19,7 @@ export class AuthService {
 
     const password_hash = await bcrypt.hash(password, 10);
     const entity = this.users.create({ email, password_hash } as any);
-    const saved = await this.users.save(entity);
+    const saved = await this.users.save(entity); // <- saved: User (pas un tableau)
 
     const token = await this.signToken(saved);
     return { token };
@@ -31,23 +31,18 @@ export class AuthService {
     if (!user) throw new UnauthorizedException('Invalid credentials');
     const ok = await bcrypt.compare(password, user.password_hash);
     if (!ok) throw new UnauthorizedException('Invalid credentials');
-    return user;
+    return user; // <- un User, pas User[]
   }
 
-  /**
-   * Connexion “classique” utilisée par certains contrôleurs:
-   * prend un User déjà validé et renvoie { token }.
-   */
-  async login(user: User) {
+  /** Connexion en une étape (email+password). */
+  async loginWithCredentials(email: string, password: string) {
+    const user = await this.validateUser(email, password);
     const token = await this.signToken(user);
     return { token };
   }
 
-  /**
-   * Connexion en une étape (email+password) si le contrôleur préfère.
-   */
-  async loginWithCredentials(email: string, password: string) {
-    const user = await this.validateUser(email, password);
+  /** Connexion quand on a déjà le User (ex: guard local). */
+  async login(user: User) {
     const token = await this.signToken(user);
     return { token };
   }
