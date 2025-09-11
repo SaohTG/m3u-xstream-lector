@@ -1,3 +1,4 @@
+// packages/api/src/modules/playlists/playlists.service.ts
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -6,13 +7,22 @@ import { Playlist } from './playlist.entity';
 
 type LinkM3UDto = { type: 'M3U'; url: string; name?: string };
 type LinkXtreamDto = { type: 'XTREAM'; host: string; username: string; password: string; name?: string };
-type LinkPlaylistDto = LinkM3UDto | LinkXtreamDto;
+export type LinkPlaylistDto = LinkM3UDto | LinkXtreamDto;
 
 @Injectable()
 export class PlaylistsService {
   private readonly logger = new Logger(PlaylistsService.name);
 
   constructor(@InjectRepository(Playlist) private readonly repo: Repository<Playlist>) {}
+
+  /** Retourne la playlist active + la liste complète pour l’utilisateur (pour /playlists/me) */
+  async me(userId: string) {
+    const [active, all] = await Promise.all([
+      this.getActiveForUser(userId),
+      this.getForUser(userId),
+    ]);
+    return { active, all };
+  }
 
   /** Toutes les playlists d’un user */
   async getForUser(userId: string): Promise<Playlist[]> {
@@ -24,10 +34,11 @@ export class PlaylistsService {
 
   /** Playlist active d’un user */
   async getActiveForUser(userId: string): Promise<Playlist | null> {
-    return this.repo.findOne({
+    const current = await this.repo.findOne({
       where: { user_id: userId, active: true } as any,
       order: { created_at: 'DESC' },
     });
+    return current ?? null;
   }
 
   /** Désactive toutes les playlists de l’utilisateur */
@@ -45,7 +56,7 @@ export class PlaylistsService {
   private async activateNew(userId: string, entity: Playlist): Promise<Playlist> {
     await this.deactivateAll(userId);
     entity.active = true;
-    return this.repo.save(entity); // <-- entity est un Playlist (pas un array)
+    return this.repo.save(entity); // <— bien un Playlist, pas un array
   }
 
   /** Lier playlist M3U ou Xtream */
@@ -54,33 +65,32 @@ export class PlaylistsService {
 
     if (dto.type === 'M3U') {
       const m3uUrl = this.normalizeM3UUrl(dto.url);
-      const entity: Playlist = this.repo.create({
+      const entity = this.repo.create({
         user_id: userId,
         type: 'M3U',
         url: m3uUrl,
         name: dto.name ?? 'M3U',
         active: true,
-      } as any);
+      } as Partial<Playlist>);
       await this.activateNew(userId, entity);
       this.logger.log(`M3U liée pour user=${userId}`);
       return { ok: true };
     }
 
-    // --- XTREAM ---
+    // XTREAM
     const { base } = await this.assertValidXtream(dto.host, dto.username, dto.password);
-
-    // Conversion XTREAM -> URL M3U (pipeline import unifié)
+    // Convertit Xtream -> M3U pour un pipeline unique
     const m3uUrl =
       `${base}/get.php?username=${encodeURIComponent(dto.username)}` +
       `&password=${encodeURIComponent(dto.password)}&type=m3u_plus&output=m3u8`;
 
-    const entity: Playlist = this.repo.create({
+    const entity = this.repo.create({
       user_id: userId,
       type: 'M3U', // on importe au format M3U
       url: m3uUrl,
       name: dto.name ?? `Xtream: ${stripProtocol(base)}`,
       active: true,
-    } as any);
+    } as Partial<Playlist>);
 
     await this.activateNew(userId, entity);
     this.logger.log(`XTREAM lié (converti M3U) pour user=${userId}`);
@@ -93,7 +103,7 @@ export class PlaylistsService {
     return { ok: true };
   }
 
-  // ------------- Helpers -------------
+  // ---------- Helpers ----------
 
   private normalizeM3UUrl(raw: string): string {
     let u = (raw || '').trim();
