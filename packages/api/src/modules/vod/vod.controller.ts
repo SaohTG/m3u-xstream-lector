@@ -1,90 +1,63 @@
-// packages/api/src/modules/vod/vod.controller.ts
-import {
-  Controller,
-  Get,
-  Param,
-  Query,
-  Res,
-  Req,
-  UnauthorizedException,
-} from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
+import { Controller, Get, Param, Query, Req, UseGuards } from '@nestjs/common';
 import { VodService } from './vod.service';
+import { JwtAuthGuard } from '../auth/jwt.guard';
 
 @Controller('vod')
+@UseGuards(JwtAuthGuard)
 export class VodController {
-  constructor(
-    private readonly vod: VodService,
-    private readonly jwt: JwtService,
-  ) {}
+  constructor(private readonly vod: VodService) {}
 
-  /** Récupère le JWT depuis Authorization, query ?t=, ou cookies */
-  private requireAuth(req: any) {
-    const secret = process.env.JWT_SECRET || 'changeme';
-    let token = '';
-
-    // 1) Authorization: Bearer ...
-    const h = req.headers?.authorization;
-    if (h && typeof h === 'string' && /^bearer /i.test(h)) {
-      token = h.slice(7);
-    }
-
-    // 2) Query ?t=
-    if (!token && typeof req.query?.t === 'string') {
-      token = req.query.t;
-    }
-
-    // 3) Cookies (httpOnly côté API)
-    if (!token) {
-      const c = req.cookies || {};
-      token = c.token || c.access_token || '';
-    }
-
-    if (!token) throw new UnauthorizedException('Missing token');
-
-    try {
-      return this.jwt.verify(token, { secret });
-    } catch {
-      throw new UnauthorizedException('Invalid token');
-    }
-  }
-
-  /** ----------- MOVIES ----------- */
-  @Get('movies/rails')
+  // ---- MOVIES (films) ----
+  @Get(['movies/rails', 'films/rails'])
   async movieRails(@Req() req: any) {
-    const user = this.requireAuth(req);
-    return await this.vod.getMovieRails(user?.sub);
+    return this.vod.getMovieRails(req.user.sub);
   }
 
-  @Get('movies/:id/details')
-  async movieDetails(@Param('id') id: string, @Req() req: any) {
-    const user = this.requireAuth(req);
-    return await this.vod.getMovieDetails(id, user?.sub);
+  @Get(['movies/:id', 'films/:id'])
+  async movieDetails(@Req() req: any, @Param('id') id: string) {
+    return this.vod.getMovieDetails(req.user.sub, id);
   }
 
-  @Get('movies/:id/hls')
-  async movieHls(@Param('id') id: string, @Req() req: any, @Res() res: any) {
-    this.requireAuth(req);
-    const text = await this.vod.buildMovieHls(id, req);
-    res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
-    res.setHeader('Cache-Control', 'no-store');
-    res.send(text);
+  @Get(['movies/:id/stream', 'films/:id/stream'])
+  async movieStream(@Req() req: any, @Param('id') id: string) {
+    return this.vod.getMovieStreamUrl(req.user.sub, id);
   }
 
-  /** ----------- EPISODES ----------- */
-  @Get('episodes/:id/hls')
-  async episodeHls(@Param('id') id: string, @Req() req: any, @Res() res: any) {
-    this.requireAuth(req);
-    const text = await this.vod.buildEpisodeHls(id, req);
-    res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
-    res.setHeader('Cache-Control', 'no-store');
-    res.send(text);
+  // ---- SHOWS (series) ----
+  @Get(['shows/rails', 'series/rails'])
+  async showRails(@Req() req: any) {
+    return this.vod.getShowRails(req.user.sub);
   }
 
-  /** ----------- PROXY SEGMENTS ----------- */
-  @Get('proxy/seg')
-  async proxySeg(@Query('u') u: string, @Req() req: any, @Res() res: any) {
-    this.requireAuth(req);
-    await this.vod.pipeSegment(u, res);
+  @Get(['shows/:id', 'series/:id'])
+  async seriesDetails(@Req() req: any, @Param('id') id: string) {
+    return this.vod.getSeriesDetails(req.user.sub, id);
+  }
+
+  @Get(['shows/:id/seasons', 'series/:id/seasons'])
+  async seriesSeasons(@Req() req: any, @Param('id') id: string) {
+    return this.vod.getSeriesSeasons(req.user.sub, id);
+  }
+
+  @Get(['shows/:sid/episodes/:eid/stream', 'series/:sid/episodes/:eid/stream'])
+  async episodeStream(@Req() req: any, @Param('sid') sid: string, @Param('eid') eid: string) {
+    return this.vod.getEpisodeStreamUrl(req.user.sub, sid, eid);
+  }
+
+  // ---- LIVE (tv) ----
+  @Get(['live/rails', 'tv/rails'])
+  async liveRails(@Req() req: any) {
+    return this.vod.getLiveRails(req.user.sub);
+  }
+
+  // HLS proxy (si tu l'utilises côté front)
+  @Get('live/:chan/hls/master')
+  async liveMaster(@Req() req: any, @Param('chan') chan: string, @Query() q: any) {
+    return this.vod.getLiveMasterM3U8(req.user.sub, chan, q);
+  }
+
+  @Get('live/:chan/hls/seg')
+  async liveSeg(@Req() req: any, @Param('chan') chan: string, @Query() q: any) {
+    return this.vod.getLiveSegment(req.user.sub, chan, q);
   }
 }
