@@ -41,7 +41,7 @@ export class PlaylistsService {
       // Désactiver toute playlist existante de l'utilisateur
       await this.repo.update({ user_id: userId } as any, { active: false } as any);
 
-      const entity = this.repo.create({
+      const entity: Playlist = this.repo.create({
         user_id: userId,
         type: 'm3u',
         url,
@@ -49,9 +49,10 @@ export class PlaylistsService {
         active: true,
         created_at: new Date(),
       } as any);
-      const saved = await this.repo.save(entity);
 
-      return { ok: true, playlist_id: saved.id };
+      // ⚠️ Typage explicite pour éviter l’inférence Playlist[]
+      const saved: Playlist = await this.repo.save(entity as Playlist);
+      return { ok: true, playlist_id: this.getPk(saved) };
     }
 
     if (dto.type === 'xtream') {
@@ -65,7 +66,7 @@ export class PlaylistsService {
 
       await this.repo.update({ user_id: userId } as any, { active: false } as any);
 
-      const entity = this.repo.create({
+      const entity: Playlist = this.repo.create({
         user_id: userId,
         type: 'xtream',
         base_url,
@@ -75,9 +76,10 @@ export class PlaylistsService {
         active: true,
         created_at: new Date(),
       } as any);
-      const saved = await this.repo.save(entity);
 
-      return { ok: true, playlist_id: saved.id };
+      // ⚠️ Typage explicite
+      const saved: Playlist = await this.repo.save(entity as Playlist);
+      return { ok: true, playlist_id: this.getPk(saved) };
     }
 
     throw new BadRequestException('type invalide (m3u|xtream)');
@@ -86,7 +88,6 @@ export class PlaylistsService {
   /** Playlist active pour l'utilisateur (utile pour VOD/live) */
   async getActiveForUser(userId: string): Promise<Playlist | null> {
     return this.repo.findOne({ where: { user_id: userId, active: true } as any });
-    //                     ^^^^^^^^^^^ findOne -> renvoie une entité, pas un tableau
   }
 
   // ----------------- Validations distantes -----------------
@@ -146,5 +147,12 @@ export class PlaylistsService {
 
   async getLiveRails(userId: string) {
     return { rails: [] };
+  }
+
+  // ----------------- Utils -----------------
+
+  /** Récupère la PK quelle que soit la nomenclature (id / playlist_id) */
+  private getPk(p: Playlist): string | number | undefined {
+    return (p as any).id ?? (p as any).playlist_id ?? (p as any).ID;
   }
 }
