@@ -7,25 +7,28 @@ import { LinkPlaylistDto } from './dto/link-playlist.dto';
 
 @Injectable()
 export class PlaylistsService {
-  constructor(@InjectRepository(Playlist) private readonly repo: Repository<Playlist>) {}
+  constructor(
+    @InjectRepository(Playlist)
+    private readonly repo: Repository<Playlist>,
+  ) {}
 
+  /** Liste des playlists de l'utilisateur (la plus récente d'abord) */
   async getForUser(userId: string) {
-    return this.repo.find({ where: { user_id: userId } as any, order: { created_at: 'DESC' } as any });
+    return this.repo.find({
+      where: { user_id: userId } as any,
+      order: { created_at: 'DESC' } as any,
+    });
   }
 
+  /** Désactive la playlist active */
   async unlink(userId: string) {
-    // désactive la playlist active
-    const active = await this.repo.findOne({ where: { user_id: userId, isActive: true } as any });
-    if (active) {
-      active.isActive = false as any;
-      await this.repo.save(active).catch(() => {});
-    }
+    await this.repo.update({ user_id: userId } as any, { active: false } as any);
     return { ok: true };
   }
 
-  // --------- Le coeur : lier M3U ou Xtream ----------
+  /** Lier une playlist M3U ou Xtream (validation incluse) */
   async link(userId: string, dto: LinkPlaylistDto) {
-    // Normalisation payload (back-compat: "url" vers "m3u_url")
+    // Back-compat (certains fronts envoient "url" au lieu de "m3u_url")
     if (dto.type === 'm3u' && !dto.m3u_url && (dto as any).url) {
       dto.m3u_url = (dto as any).url;
     }
@@ -33,23 +36,22 @@ export class PlaylistsService {
     if (dto.type === 'm3u') {
       const url = (dto.m3u_url || '').trim();
       if (!url) throw new BadRequestException('m3u_url requis');
+      await this.assertValidM3U(url);
 
-      await this.assertValidM3U(url); // 400 si invalide
+      // Désactiver toute playlist existante de l'utilisateur
+      await this.repo.update({ user_id: userId } as any, { active: false } as any);
 
-      // désactive l’ancienne active
-      await this.repo.update({ user_id: userId } as any, { isActive: false } as any);
-
-      const pl = this.repo.create({
+      const entity = this.repo.create({
         user_id: userId,
         type: 'm3u',
         url,
         name: dto.name || 'M3U',
-        isActive: true,
+        active: true,
         created_at: new Date(),
       } as any);
-      await this.repo.save(pl);
+      const saved = await this.repo.save(entity);
 
-      return { ok: true, playlist_id: pl.id };
+      return { ok: true, playlist_id: saved.id };
     }
 
     if (dto.type === 'xtream') {
@@ -59,38 +61,50 @@ export class PlaylistsService {
       if (!base_url || !username || !password) {
         throw new BadRequestException('base_url, username et password requis');
       }
+      await this.assertValidXtream(base_url, username, password);
 
-      await this.assertValidXtream(base_url, username, password); // 400 si invalide
+      await this.repo.update({ user_id: userId } as any, { active: false } as any);
 
-      await this.repo.update({ user_id: userId } as any, { isActive: false } as any);
-
-      const pl = this.repo.create({
+      const entity = this.repo.create({
         user_id: userId,
         type: 'xtream',
         base_url,
         username,
         password,
         name: dto.name || 'Xtream',
-        isActive: true,
+        active: true,
         created_at: new Date(),
       } as any);
-      await this.repo.save(pl);
+      const saved = await this.repo.save(entity);
 
-      return { ok: true, playlist_id: pl.id };
+      return { ok: true, playlist_id: saved.id };
     }
 
     throw new BadRequestException('type invalide (m3u|xtream)');
   }
 
-  // --- Helpers de validation distants ---
+  /** Playlist active pour l'utilisateur (utile pour VOD/live) */
+  async getActiveForUser(userId: string): Promise<Playlist | null> {
+    return this.repo.findOne({ where: { user_id: userId, active: true } as any });
+    //                     ^^^^^^^^^^^ findOne -> renvoie une entité, pas un tableau
+  }
+
+  // ----------------- Validations distantes -----------------
+
   private async assertValidM3U(url: string) {
     try {
-      const res = await axios.get(url, { timeout: 7000, responseType: 'text', validateStatus: () => true });
+      const res = await axios.get(url, {
+        timeout: 7000,
+        responseType: 'text',
+        validateStatus: () => true,
+      });
       const text: string = typeof res.data === 'string' ? res.data : `${res.data}`;
       if (!/^#EXTM3U/m.test(text)) {
         throw new BadRequestException('Playlist M3U invalide (manque #EXTM3U)');
       }
-      if (res.status >= 400) throw new BadRequestException(`M3U inaccessible (HTTP ${res.status})`);
+      if (res.status >= 400) {
+        throw new BadRequestException(`M3U inaccessible (HTTP ${res.status})`);
+      }
     } catch (e: any) {
       if (e?.response) {
         throw new BadRequestException(`M3U inaccessible (HTTP ${e.response.status})`);
@@ -100,11 +114,17 @@ export class PlaylistsService {
   }
 
   private async assertValidXtream(base_url: string, username: string, password: string) {
-    const url = `${base_url}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
+    const url = `${base_url}/player_api.php?username=${encodeURIComponent(
+      username,
+    )}&password=${encodeURIComponent(password)}`;
     try {
       const res = await axios.get(url, { timeout: 7000, validateStatus: () => true });
-      if (res.status >= 400) throw new BadRequestException(`Xtream inaccessible (HTTP ${res.status})`);
-      const ok = !!res.data && (res.data.user_info?.auth === 1 || res.data.user_info?.status === 'Active');
+      if (res.status >= 400) {
+        throw new BadRequestException(`Xtream inaccessible (HTTP ${res.status})`);
+      }
+      const ok =
+        !!res.data &&
+        (res.data.user_info?.auth === 1 || res.data.user_info?.status === 'Active');
       if (!ok) throw new BadRequestException('Identifiants Xtream invalides');
     } catch (e: any) {
       if (e?.response) {
@@ -114,9 +134,17 @@ export class PlaylistsService {
     }
   }
 
-  // --------- (Optionnel) Méthodes utilisées par VodService ---------
-  // Placeholder: retourne rails vides si ingestion non encore implémentée
-  async getMovieRails(userId: string) { return { rails: [] }; }
-  async getShowRails(userId: string)  { return { rails: [] }; }
-  async getLiveRails(userId: string)  { return { rails: [] }; }
+  // ----------------- Stubs (utilisés par VodService) -----------------
+
+  async getMovieRails(userId: string) {
+    return { rails: [] };
+  }
+
+  async getShowRails(userId: string) {
+    return { rails: [] };
+  }
+
+  async getLiveRails(userId: string) {
+    return { rails: [] };
+  }
 }
