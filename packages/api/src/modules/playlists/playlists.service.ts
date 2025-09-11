@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import axios from 'axios';
-import { Repository } from 'typeorm';
+import { Repository, DeepPartial } from 'typeorm';
 import { Playlist } from './playlist.entity';
 import { LinkPlaylistDto } from './dto/link-playlist.dto';
 
@@ -20,7 +20,7 @@ export class PlaylistsService {
     });
   }
 
-  /** Désactive la playlist active */
+  /** Désactive toutes les playlists de l'utilisateur */
   async unlink(userId: string) {
     await this.repo.update({ user_id: userId } as any, { active: false } as any);
     return { ok: true };
@@ -28,7 +28,7 @@ export class PlaylistsService {
 
   /** Lier une playlist M3U ou Xtream (validation incluse) */
   async link(userId: string, dto: LinkPlaylistDto) {
-    // Back-compat : certains fronts envoient "url" au lieu de "m3u_url"
+    // rétro-compat : certains fronts envoient "url" au lieu de "m3u_url"
     if (dto.type === 'm3u' && !dto.m3u_url && (dto as any).url) {
       dto.m3u_url = (dto as any).url;
     }
@@ -38,20 +38,20 @@ export class PlaylistsService {
       if (!url) throw new BadRequestException('m3u_url requis');
       await this.assertValidM3U(url);
 
-      // Désactiver toutes les playlists existantes de l'utilisateur
+      // désactiver les anciennes
       await this.repo.update({ user_id: userId } as any, { active: false } as any);
 
-      // ⚠️ créer UNE entité (pas de crochets)
-      const entity = this.repo.create({
+      // ⚠️ typer l’argument de create pour éviter la surcharge “array”
+      const payload: DeepPartial<Playlist> = {
         user_id: userId,
         type: 'm3u',
         url,
         name: dto.name || 'M3U',
         active: true,
         created_at: new Date(),
-      } as any) as Playlist;
-
-      const saved = await this.repo.save(entity); // saved: Playlist
+      };
+      const entity: Playlist = this.repo.create(payload);
+      const saved: Playlist = await this.repo.save(entity);
       return { ok: true, playlist_id: this.getPk(saved) };
     }
 
@@ -64,10 +64,9 @@ export class PlaylistsService {
       }
       await this.assertValidXtream(base_url, username, password);
 
-      await this.repo.update({ user_id: userId } as any, { active: false } as any);
+      await self.repo.update({ user_id: userId } as any, { active: false } as any);
 
-      // ⚠️ créer UNE entité (pas de crochets)
-      const entity = this.repo.create({
+      const payload: DeepPartial<Playlist> = {
         user_id: userId,
         type: 'xtream',
         base_url,
@@ -76,9 +75,9 @@ export class PlaylistsService {
         name: dto.name || 'Xtream',
         active: true,
         created_at: new Date(),
-      } as any) as Playlist;
-
-      const saved = await this.repo.save(entity); // saved: Playlist
+      };
+      const entity: Playlist = this.repo.create(payload);
+      const saved: Playlist = await this.repo.save(entity);
       return { ok: true, playlist_id: this.getPk(saved) };
     }
 
