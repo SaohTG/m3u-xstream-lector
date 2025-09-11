@@ -1,32 +1,36 @@
-import { Body, Controller, Get, Post, Delete, Req, UseGuards, UnauthorizedException } from '@nestjs/common';
-import type { Request } from 'express';
-import { JwtAuthGuard } from '../auth/jwt.guard';
+import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import { Request } from 'express';
 import { PlaylistsService } from './playlists.service';
-import { LinkPlaylistDto } from './dto/link-playlist.dto';
+import { JwtAuthGuard } from '../auth/jwt.guard';
 
-@UseGuards(JwtAuthGuard)
 @Controller('playlists')
+@UseGuards(JwtAuthGuard)
 export class PlaylistsController {
   constructor(private readonly svc: PlaylistsService) {}
 
   @Get('me')
   async me(@Req() req: Request) {
-    const uid = (req as any)?.user?.id || (req as any)?.user?.sub;
-    if (!uid) throw new UnauthorizedException('Missing user id');
-    return this.svc.getForUser(uid);
+    const user: any = req.user;
+    const list = await this.svc.getForUser(user.id);
+    const active = await this.svc.getActiveForUser(user.id);
+    return {
+      activeId: active?.id ?? null,
+      items: list,
+    };
   }
 
   @Post('link')
-  async link(@Req() req: Request, @Body() dto: LinkPlaylistDto) {
-    const uid = (req as any)?.user?.id || (req as any)?.user?.sub;
-    if (!uid) throw new UnauthorizedException('Missing user id');
-    return this.svc.link(uid, dto);
+  async link(@Req() req: Request, @Body() dto: any) {
+    const user: any = req.user;
+    // dto peut être { type:'M3U', url } ou { type:'XTREAM', host, username, password }
+    await this.svc.link(user.id, dto);
+    return { ok: true };
   }
 
-  @Delete('unlink')
+  @Post('unlink')
   async unlink(@Req() req: Request) {
-    const uid = (req as any)?.user?.id || (req as any)?.user?.sub;
-    if (!uid) throw new UnauthorizedException('Missing user id');
-    return this.svc.unlink(uid);
+    const user: any = req.user;
+    await this.svc.unlink(user.id);
+    return { ok: true };
   }
 }
