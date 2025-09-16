@@ -31,8 +31,10 @@ export default function Onboarding() {
     (async () => {
       try {
         setChecking(true);
-        const me = await api('/playlists/me');
-        setCurrent(Array.isArray(me) ? me.find((p: any) => p.isActive) || me[0] || null : null);
+        const res = await api('/playlists/me');
+        const items = Array.isArray(res?.items) ? res.items : [];
+        const active = items.find((p: any) => p.active) || null;
+        setCurrent(active);
       } catch (e) {
         // pas bloquant
       } finally {
@@ -67,7 +69,7 @@ export default function Onboarding() {
         await api('/playlists/link', {
           body: {
             type: 'm3u',
-            m3u_url: url,               // <- IMPORTANT : m3u_url côté API
+            m3u_url: url,
             name: name.trim() || undefined,
           },
         });
@@ -82,7 +84,7 @@ export default function Onboarding() {
         await api('/playlists/link', {
           body: {
             type: 'xtream',
-            base_url: base,            // <- IMPORTANT : base_url côté API
+            base_url: base,
             username: xtUser.trim(),
             password: xtPass,
             name: name.trim() || undefined,
