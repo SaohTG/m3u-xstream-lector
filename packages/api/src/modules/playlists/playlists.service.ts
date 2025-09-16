@@ -1,12 +1,11 @@
-// packages/api/src/modules/playlists/playlists.service.ts
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import axios, { AxiosRequestConfig } from 'axios';
 import { Playlist } from './playlist.entity';
 
-type LinkM3UDto = { type: 'M3U'; url: string; name?: string };
-type LinkXtreamDto = { type: 'XTREAM'; host: string; username: string; password: string; name?: string };
+type LinkM3UDto = { type: 'm3u'; m3u_url?: string; url?: string; name?: string };
+type LinkXtreamDto = { type: 'xtream'; base_url: string; username: string; password: string; name?: string };
 export type LinkPlaylistDto = LinkM3UDto | LinkXtreamDto;
 
 @Injectable()
@@ -63,8 +62,8 @@ export class PlaylistsService {
   async link(userId: string, dto: LinkPlaylistDto): Promise<{ ok: true }> {
     if (!userId) throw new Error('userId manquant');
 
-    if (dto.type === 'M3U') {
-      const m3uUrl = this.normalizeM3UUrl(dto.url);
+    if (dto.type === 'm3u') {
+      const m3uUrl = this.normalizeM3UUrl(dto.m3u_url ?? dto.url);
       const entity = this.repo.create({
         user_id: userId,
         type: 'M3U',
@@ -78,7 +77,7 @@ export class PlaylistsService {
     }
 
     // XTREAM
-    const { base } = await this.assertValidXtream(dto.host, dto.username, dto.password);
+    const { base } = await this.assertValidXtream(dto.base_url, dto.username, dto.password);
     // Convertit Xtream -> M3U pour un pipeline unique
     const m3uUrl =
       `${base}/get.php?username=${encodeURIComponent(dto.username)}` +
@@ -136,10 +135,10 @@ export class PlaylistsService {
   }
 
   /** Vérifie l’accessibilité Xtream (HTTP/HTTPS) et l’état du compte */
-  private async assertValidXtream(hostRaw: string, username: string, password: string) {
+  private async assertValidXtream(baseUrlRaw: string, username: string, password: string) {
     const allowWithout = (process.env.ALLOW_XTREAM_LINK_WITHOUT_VALIDATE ?? 'false') === 'true';
 
-    const first = this.normalizeXtreamHost(hostRaw);
+    const first = this.normalizeXtreamHost(baseUrlRaw);
     const candidates: string[] = [];
     if (/^http:\/\//i.test(first)) {
       candidates.push(first, first.replace(/^http:\/\//i, 'https://'));
@@ -177,7 +176,7 @@ export class PlaylistsService {
 
     if (allowWithout) {
       this.logger.warn('assertValidXtream: validation échouée, ALLOW_XTREAM_LINK_WITHOUT_VALIDATE=true => acceptée');
-      return { base: this.normalizeXtreamHost(hostRaw) };
+      return { base: this.normalizeXtreamHost(baseUrlRaw) };
     }
 
     if (lastStatus === 401) throw new Error('Xtream identifiants invalides (HTTP 401)');
