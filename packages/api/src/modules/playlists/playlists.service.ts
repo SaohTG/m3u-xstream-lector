@@ -14,7 +14,6 @@ export class PlaylistsService {
 
   constructor(@InjectRepository(Playlist) private readonly repo: Repository<Playlist>) {}
 
-  /** Retourne la playlist active + la liste complète pour l’utilisateur (pour /playlists/me) */
   async me(userId: string) {
     const [active, all] = await Promise.all([
       this.getActiveForUser(userId),
@@ -23,7 +22,6 @@ export class PlaylistsService {
     return { active, all };
   }
 
-  /** Toutes les playlists d’un user */
   async getForUser(userId: string): Promise<Playlist[]> {
     return this.repo.find({
       where: { user_id: userId } as any,
@@ -31,7 +29,6 @@ export class PlaylistsService {
     });
   }
 
-  /** Playlist active d’un user */
   async getActiveForUser(userId: string): Promise<Playlist | null> {
     const current = await this.repo.findOne({
       where: { user_id: userId, active: true } as any,
@@ -40,7 +37,6 @@ export class PlaylistsService {
     return current ?? null;
   }
 
-  /** Désactive toutes les playlists de l’utilisateur */
   private async deactivateAll(userId: string): Promise<void> {
     await this.repo
       .createQueryBuilder()
@@ -51,20 +47,17 @@ export class PlaylistsService {
       .execute();
   }
 
-  /** Active la nouvelle playlist (désactive les autres) */
   private async activateNew(userId: string, entity: Playlist): Promise<Playlist> {
     await this.deactivateAll(userId);
     entity.active = true;
     return this.repo.save(entity);
   }
 
-  /** Lier playlist M3U ou Xtream */
   async link(userId: string, dto: LinkPlaylistDto): Promise<{ ok: true }> {
     if (!userId) throw new Error('userId manquant');
 
     if (dto.type === 'm3u') {
       const m3uUrl = this.normalizeM3UUrl(dto.m3u_url ?? dto.url ?? '');
-      // On peut valider qu’elle n’est pas vide pour aider au debug
       const { entries } = await this.validateM3UNotEmpty(m3uUrl);
       this.logger.log(`M3U validée: ${entries} entrées détectées`);
       const entity = this.repo.create({
@@ -86,13 +79,13 @@ export class PlaylistsService {
 
     const { base } = await this.assertValidXtream(dto.base_url, dto.username, dto.password);
 
-    // Tente plusieurs variantes get.php jusqu’à trouver une playlist non vide
+    // Tente plusieurs variantes (protocole, chemins, paramètres) jusqu’à trouver une M3U non vide
     const { workingUrl, entries } = await this.buildXtreamM3UWithFallback(base, dto.username, dto.password);
     this.logger.log(`XTREAM M3U choisie: ${workingUrl} (${entries} entrées)`);
 
     const entity = this.repo.create({
       user_id: userId,
-      type: 'M3U', // on importe/consomme au format M3U
+      type: 'M3U',
       url: workingUrl,
       name: dto.name ?? `Xtream: ${stripProtocol(base)}`,
       active: true,
@@ -103,7 +96,6 @@ export class PlaylistsService {
     return { ok: true };
   }
 
-  /** Délier (= désactiver la playlist active) */
   async unlink(userId: string): Promise<{ ok: true }> {
     await this.deactivateAll(userId);
     return { ok: true };
@@ -141,7 +133,6 @@ export class PlaylistsService {
     return axios.get(url, cfg);
   }
 
-  /** Vérifie l’accessibilité Xtream (HTTP/HTTPS) et l’état du compte */
   private async assertValidXtream(baseUrlRaw: string, username: string, password: string) {
     const allowWithout = (process.env.ALLOW_XTREAM_LINK_WITHOUT_VALIDATE ?? 'false') === 'true';
 
@@ -191,7 +182,6 @@ export class PlaylistsService {
     throw new Error(`Xtream non joignable (HTTP ${lastStatus || '???'})`);
   }
 
-  /** Télécharge une M3U et retourne le nombre d’entrées détectées */
   private async validateM3UNotEmpty(url: string): Promise<{ entries: number, body: string }> {
     const cfg: AxiosRequestConfig = {
       timeout: 15000,
@@ -215,18 +205,37 @@ export class PlaylistsService {
     return { entries, body };
   }
 
-  /** Construit l’URL M3U Xtream qui fonctionne réellement (avec fallback) */
   private async buildXtreamM3UWithFallback(base: string, username: string, password: string): Promise<{ workingUrl: string, entries: number }> {
+    const switchProtocol = (u: string) =>
+      u.startsWith('https://') ? u.replace(/^https:\/\//i, 'http://') : u.replace(/^http:\/\//i, 'https://');
+
+    const uniq = <T>(arr: T[]) => Array.from(new Set(arr));
+
+    const bases = uniq([base, switchProtocol(base)]);
+
+    // Certains panels exposent get.php sous /playlist ou /panel
+    const paths = ['', '/playlist', '/panel'];
+
     const q = `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
-    const candidates = [
-      `${base}/get.php?${q}&type=m3u_plus&output=m3u8`,
-      `${base}/get.php?${q}&type=m3u&output=m3u8`,
-      `${base}/get.php?${q}&type=m3u_plus&output=ts`,
-      `${base}/get.php?${q}&type=m3u&output=ts`,
-    ];
+
+    const urlCandidates: string[] = [];
+    for (const b of bases) {
+      for (const p of paths) {
+        const root = `${b}${p}`;
+        urlCandidates.push(
+          `${root}/get.php?${q}&type=m3u_plus&output=m3u8`,
+          `${root}/get.php?${q}&type=m3u_plus&output=ts`,
+          `${root}/get.php?${q}&type=m3u&output=m3u8`,
+          `${root}/get.php?${q}&type=m3u&output=ts`,
+          `${root}/get.php?${q}&type=m3u_plus`,
+          `${root}/get.php?${q}&type=m3u`,
+          `${root}/get.php?${q}` // sans params additionnels
+        );
+      }
+    }
 
     let lastErr: any = null;
-    for (const url of candidates) {
+    for (const url of urlCandidates) {
       try {
         const { entries } = await this.validateM3UNotEmpty(url);
         return { workingUrl: url, entries };
