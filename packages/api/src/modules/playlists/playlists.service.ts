@@ -76,10 +76,11 @@ export class PlaylistsService {
         return entity;
       }
 
-      // découvres la base Xtream puis crée la M3U
+      // 3) Découverte Xtream depuis l'URL M3U (on en tirera juste le host)
+      const baseForDiscovery = this.hostFromMaybeUrl(m3uUrl);
       return await this.linkXtreamFlow(userId, {
         type: 'xtream',
-        base_url: m3uUrl,
+        base_url: baseForDiscovery,
         username,
         password,
         name: dto.name,
@@ -182,8 +183,21 @@ export class PlaylistsService {
   // ---------------------------------------------------------------------------
   // Découverte panel Xtream via player_api.php
   // ---------------------------------------------------------------------------
+
+  /** Extrait un hostname nettoyé depuis un host brut ou une URL complète. */
+  private hostFromMaybeUrl(raw: string): string {
+    const r = (raw || '').trim();
+    try {
+      const u = new URL(/^https?:\/\//i.test(r) ? r : `http://${r}`);
+      return u.hostname;
+    } catch {
+      // fallback: strip protocole, couper sur / et ?
+      return stripProtocol(r).split('/')[0].split('?')[0];
+    }
+  }
+
   private XTREAM_CANDIDATE_BASES(raw: string): string[] {
-    const host = stripProtocol(raw);
+    const host = this.hostFromMaybeUrl(raw);
     const bases = [
       `https://${host}`,
       `http://${host}`,
@@ -218,12 +232,18 @@ export class PlaylistsService {
   }
 
   private async discoverXtreamBase(baseHostOrUrl: string, username: string, password: string): Promise<string | null> {
-    for (const base of this.XTREAM_CANDIDATE_BASES(baseHostOrUrl)) {
+    const candidates = this.XTREAM_CANDIDATE_BASES(baseHostOrUrl);
+    this.logger.log(`XTREAM discovery: host="${this.hostFromMaybeUrl(baseHostOrUrl)}" candidates=${candidates.join(', ')}`);
+    for (const base of candidates) {
       const url = `${base}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
       const j = await this.fetchJson(url);
       if (j && typeof j === 'object' && j.user_info && j.server_info) {
-        const serverUrl: string | undefined = j.server_info.url;
-        const chosen = (serverUrl && serverUrl.startsWith('http') ? serverUrl : base).replace(/\/+$/, '');
+        let serverUrl: string | undefined = j.server_info.url;
+        // certains panels renvoient "host:port" sans protocole
+        if (serverUrl && !/^https?:\/\//i.test(serverUrl)) {
+          serverUrl = `http://${serverUrl}`;
+        }
+        const chosen = (serverUrl && /^https?:\/\//i.test(serverUrl) ? serverUrl : base).replace(/\/+$/, '');
         this.logger.log(`XTREAM discovery OK via ${base} → ${chosen}`);
         return chosen;
       }
