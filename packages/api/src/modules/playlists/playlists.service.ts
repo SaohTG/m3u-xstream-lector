@@ -125,6 +125,7 @@ export class PlaylistsService {
   private normalizeXtreamHost(raw: string): string {
     let h = (raw || '').trim();
     if (!h) throw new Error('Host Xtream vide');
+    // Conserver le chemin (ex: /c) éventuel, juste nettoyer trailing slashes
     h = h.replace(/\s+/g, '').replace(/\/+$/, '');
     if (!/^https?:\/\//i.test(h)) h = `http://${h}`;
     return h;
@@ -199,7 +200,7 @@ export class PlaylistsService {
   private async tryDownloadText(url: string): Promise<AxiosResponse<string>> {
     const cfg: AxiosRequestConfig = {
       timeout: 15000,
-      maxRedirects: 2,
+      maxRedirects: 5,
       headers: {
         'User-Agent': 'VLC/3.0.18 LibVLC/3.0.18',
         Accept: 'audio/x-mpegurl, application/vnd.apple.mpegurl, */*',
@@ -241,22 +242,23 @@ export class PlaylistsService {
    * Construit l’URL M3U Xtream qui fonctionne réellement (avec fallback élargi et heuristiques):
    * - protocoles: privilégie HTTP pour ports 8080/8000/25461, HTTPS pour 443/8443
    * - ports: 80, 8080, 8000, 25461 (HTTP) et 443, 8443 (HTTPS)
-   * - chemins: /get.php, /playlist/get.php, /panel/get.php, /player/get.php, /xc/get.php, /xtreamcodes/get.php, /streaming/get.php, /cms/get.php
+   * - conserve le chemin fourni par l’utilisateur (ex: /c)
+   * - chemins supplémentaires testés: '', '/c', '/playlist', '/panel', '/player', '/xc', '/xtreamcodes', '/streaming', '/cms'
    * - paramètres: type=m3u_plus|m3u, output=m3u8|ts, et sans type/output
    */
   private async buildXtreamM3UWithFallback(base: string, username: string, password: string): Promise<{ workingUrl: string; entries: number }> {
     const clean = (u: string) => u.replace(/\/+$/, '');
     const normBase = clean(base);
     const u = new URL(normBase);
+
     const hostname = u.hostname;
+    const basePath = clean(u.pathname || ''); // conserve un éventuel chemin (ex: /c). Peut être ''.
+    const initialPort = u.port ? Number(u.port) : undefined;
+    const initialProto = u.protocol.replace(':', '');
 
     // Heuristique: ports HTTP et HTTPS probables
     const httpPorts = [80, 8080, 8000, 25461];
     const httpsPorts = [443, 8443];
-
-    // Si base contient déjà un port, on le respecte dans la première position
-    const initialPort = u.port ? Number(u.port) : undefined;
-    const initialProto = u.protocol.replace(':', '');
 
     const orderedHttpPorts = initialPort && initialProto === 'http'
       ? [initialPort, ...httpPorts.filter(p => p !== initialPort)]
@@ -266,26 +268,24 @@ export class PlaylistsService {
       ? [initialPort, ...httpsPorts.filter(p => p !== initialPort)]
       : httpsPorts;
 
-    // Construit les origins candidats, en priorisant:
-    // - http sur ports HTTP
-    // - https sur ports HTTPS
+    // Construit les origins candidats (inclut l'origine exacte en premier)
     const origins: string[] = [];
+    const origExact = `${u.protocol}//${hostname}${u.port ? `:${u.port}` : ''}`;
+    origins.push(origExact);
 
     for (const p of orderedHttpPorts) {
-      origins.push(`http://${hostname}${p && p !== 80 ? `:${p}` : ''}`);
+      const origin = `http://${hostname}${p && p !== 80 ? `:${p}` : ''}`;
+      if (!origins.includes(origin)) origins.push(origin);
     }
     for (const p of orderedHttpsPorts) {
-      origins.push(`https://${hostname}${p && p !== 443 ? `:${p}` : ''}`);
+      const origin = `https://${hostname}${p && p !== 443 ? `:${p}` : ''}`;
+      if (!origins.includes(origin)) origins.push(origin);
     }
 
-    // Ajoute l'origine exacte fournie en premier si absente
-    const origExact = `${u.protocol}//${hostname}${u.port ? `:${u.port}` : ''}`;
-    if (!origins.includes(origExact)) origins.unshift(origExact);
+    // Sous-chemins à tester en plus du chemin fourni
+    const extraPaths = ['', '/c', '/playlist', '/panel', '/player', '/xc', '/xtreamcodes', '/streaming', '/cms'];
 
-    const paths = ['', '/playlist', '/panel', '/player', '/xc', '/xtreamcodes', '/streaming', '/cms'];
-    const q = `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
-
-    // On place les combinaisons "type/output" selon popularité
+    // Paramètres selon popularité
     const paramCombos = [
       `type=m3u_plus&output=m3u8`,
       `type=m3u_plus&output=ts`,
@@ -296,10 +296,20 @@ export class PlaylistsService {
       ``,
     ];
 
+    const q = `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
     const urlCandidates: string[] = [];
+
     for (const origin of origins) {
-      for (const p of paths) {
-        const root = `${origin}${p}`;
+      // On essaie d'abord avec le chemin fourni par l'utilisateur (s'il existe)
+      const rootsToTry = basePath ? [`${origin}${basePath}`] : [`${origin}`];
+
+      // Puis on ajoute les sous-chemins génériques en plus (en évitant doublons)
+      for (const p of extraPaths) {
+        const r = `${origin}${p}`;
+        if (!rootsToTry.includes(r)) rootsToTry.push(r);
+      }
+
+      for (const root of rootsToTry) {
         for (const pc of paramCombos) {
           const tail = pc ? `&${pc}` : '';
           urlCandidates.push(`${root}/get.php?${q}${tail}`);
