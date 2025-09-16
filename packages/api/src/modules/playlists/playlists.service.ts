@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import axios, { AxiosRequestConfig } from 'axios';
+import axios, { AxiosRequestConfig, AxiosResponse } from 'axios';
 import * as https from 'https';
 import { Playlist } from './playlist.entity';
 
@@ -195,8 +195,8 @@ export class PlaylistsService {
     throw new Error(`Xtream non joignable (HTTP ${lastStatus || '???'})`);
   }
 
-  /** Télécharge une M3U et retourne le nombre d’entrées détectées */
-  private async validateM3UNotEmpty(url: string): Promise<{ entries: number; body: string }> {
+  /** Télécharge du texte, en basculant automatiquement https->http si EPROTO (mauvais protocole) */
+  private async tryDownloadText(url: string): Promise<AxiosResponse<string>> {
     const cfg: AxiosRequestConfig = {
       timeout: 15000,
       maxRedirects: 2,
@@ -208,7 +208,25 @@ export class PlaylistsService {
       responseType: 'text',
       validateStatus: () => true,
     };
-    const res = await axios.get<string>(url, cfg as any);
+
+    try {
+      return await axios.get<string>(url, cfg as any);
+    } catch (e: any) {
+      const msg = String(e?.message || '');
+      const code = e?.code || '';
+      // Si on parlait en HTTPS sur un port HTTP (8080/8000/25461), retente immédiatement en HTTP
+      if ((code === 'EPROTO' || msg.includes('wrong version number')) && url.startsWith('https://')) {
+        const httpUrl = url.replace(/^https:\/\//i, 'http://');
+        this.logger.warn(`EPROTO sur ${url} -> retry en HTTP: ${httpUrl}`);
+        return await axios.get<string>(httpUrl, cfg as any);
+      }
+      throw e;
+    }
+  }
+
+  /** Télécharge une M3U et retourne le nombre d’entrées détectées */
+  private async validateM3UNotEmpty(url: string): Promise<{ entries: number; body: string }> {
+    const res = await this.tryDownloadText(url);
     if (res.status !== 200) {
       throw new Error(`Lecture M3U échouée (HTTP ${res.status})`);
     }
@@ -220,55 +238,72 @@ export class PlaylistsService {
   }
 
   /**
-   * Construit l’URL M3U Xtream qui fonctionne réellement (avec fallback élargi):
-   * - protocoles: http et https (switch auto)
-   * - ports: défaut + :80, :8080, :8000, :25461 (ports fréquents)
+   * Construit l’URL M3U Xtream qui fonctionne réellement (avec fallback élargi et heuristiques):
+   * - protocoles: privilégie HTTP pour ports 8080/8000/25461, HTTPS pour 443/8443
+   * - ports: 80, 8080, 8000, 25461 (HTTP) et 443, 8443 (HTTPS)
    * - chemins: /get.php, /playlist/get.php, /panel/get.php, /player/get.php, /xc/get.php, /xtreamcodes/get.php, /streaming/get.php, /cms/get.php
    * - paramètres: type=m3u_plus|m3u, output=m3u8|ts, et sans type/output
    */
   private async buildXtreamM3UWithFallback(base: string, username: string, password: string): Promise<{ workingUrl: string; entries: number }> {
-    const switchProtocol = (u: string) =>
-      u.startsWith('https://') ? u.replace(/^https:\/\//i, 'http://') : u.replace(/^http:\/\//i, 'https://');
-
-    const uniq = <T>(arr: T[]) => Array.from(new Set(arr));
-
-    // Nettoie trailing slash
     const clean = (u: string) => u.replace(/\/+$/, '');
+    const normBase = clean(base);
+    const u = new URL(normBase);
+    const hostname = u.hostname;
 
-    const bases = uniq([clean(base), clean(switchProtocol(base))]);
+    // Heuristique: ports HTTP et HTTPS probables
+    const httpPorts = [80, 8080, 8000, 25461];
+    const httpsPorts = [443, 8443];
 
-    // Ajoute variantes de ports
-    const commonPorts = ['', ':80', ':8080', ':8000', ':25461'];
-    const withPorts: string[] = [];
-    for (const b of bases) {
-      const url = new URL(b);
-      const host = url.origin.replace(/\/+$/, '');
-      for (const port of commonPorts) {
-        // Évite doubler le port si déjà présent
-        if (port && /:\d+$/.test(host)) {
-          withPorts.push(host); // garde tel quel
-        } else {
-          withPorts.push(port ? host.replace(/(:\d+)?$/, '') + port : host);
-        }
-      }
+    // Si base contient déjà un port, on le respecte dans la première position
+    const initialPort = u.port ? Number(u.port) : undefined;
+    const initialProto = u.protocol.replace(':', '');
+
+    const orderedHttpPorts = initialPort && initialProto === 'http'
+      ? [initialPort, ...httpPorts.filter(p => p !== initialPort)]
+      : httpPorts;
+
+    const orderedHttpsPorts = initialPort && initialProto === 'https'
+      ? [initialPort, ...httpsPorts.filter(p => p !== initialPort)]
+      : httpsPorts;
+
+    // Construit les origins candidats, en priorisant:
+    // - http sur ports HTTP
+    // - https sur ports HTTPS
+    const origins: string[] = [];
+
+    for (const p of orderedHttpPorts) {
+      origins.push(`http://${hostname}${p && p !== 80 ? `:${p}` : ''}`);
     }
+    for (const p of orderedHttpsPorts) {
+      origins.push(`https://${hostname}${p && p !== 443 ? `:${p}` : ''}`);
+    }
+
+    // Ajoute l'origine exacte fournie en premier si absente
+    const origExact = `${u.protocol}//${hostname}${u.port ? `:${u.port}` : ''}`;
+    if (!origins.includes(origExact)) origins.unshift(origExact);
 
     const paths = ['', '/playlist', '/panel', '/player', '/xc', '/xtreamcodes', '/streaming', '/cms'];
     const q = `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
 
+    // On place les combinaisons "type/output" selon popularité
+    const paramCombos = [
+      `type=m3u_plus&output=m3u8`,
+      `type=m3u_plus&output=ts`,
+      `type=m3u&output=m3u8`,
+      `type=m3u&output=ts`,
+      `type=m3u_plus`,
+      `type=m3u`,
+      ``,
+    ];
+
     const urlCandidates: string[] = [];
-    for (const b of uniq(withPorts)) {
+    for (const origin of origins) {
       for (const p of paths) {
-        const root = `${b}${p}`;
-        urlCandidates.push(
-          `${root}/get.php?${q}&type=m3u_plus&output=m3u8`,
-          `${root}/get.php?${q}&type=m3u_plus&output=ts`,
-          `${root}/get.php?${q}&type=m3u&output=m3u8`,
-          `${root}/get.php?${q}&type=m3u&output=ts`,
-          `${root}/get.php?${q}&type=m3u_plus`,
-          `${root}/get.php?${q}&type=m3u`,
-          `${root}/get.php?${q}`
-        );
+        const root = `${origin}${p}`;
+        for (const pc of paramCombos) {
+          const tail = pc ? `&${pc}` : '';
+          urlCandidates.push(`${root}/get.php?${q}${tail}`);
+        }
       }
     }
 
@@ -281,7 +316,9 @@ export class PlaylistsService {
         return { workingUrl: url, entries };
       } catch (e) {
         lastErr = e;
-        this.logger.warn(`M3U candidate KO: ${url} -> ${(e as Error).message}`);
+        const msg = (e as Error).message;
+        this.logger.warn(`M3U candidate KO: ${url} -> ${msg}`);
+        continue;
       }
     }
     throw new Error(`Impossible d’obtenir une M3U non vide via Xtream (${lastErr?.message || 'erreur inconnue'})`);
