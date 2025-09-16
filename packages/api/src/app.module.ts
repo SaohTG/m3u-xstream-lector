@@ -13,7 +13,7 @@ const log = new Logger('AppModule');
 const DB_HOST = process.env.DB_HOST || 'db';          // << par défaut 'db' (service docker)
 const DB_PORT = parseInt(process.env.DB_PORT || '5432', 10);
 const DB_USER = process.env.DB_USER || 'novastream';
-const DB_PASS = process.env.DB_PASS || 'novastream';
+const DB_PASS = process.env.DB_PASS || 'c6?NJ*Y3oqd!LUU.!3ct';
 const DB_NAME = process.env.DB_NAME || 'novastream';
 const SYNC = (process.env.TYPEORM_SYNC || 'true') === 'true';
 
