@@ -42,102 +42,62 @@ export class PlaylistsService {
       if (!rawUrl) throw new Error('URL M3U manquante');
       const m3uUrl = this.normalizeM3UUrl(rawUrl);
 
-      // 1) tentative M3U directe
-      try {
-        const { entries } = await this.validateM3UNotEmpty(m3uUrl);
-        this.logger.log(`M3U validée (${entries} entrées)`);
-        const entity = this.repo.create({
-          user_id: userId,
-          type: 'M3U',
-          url: m3uUrl,
-          name: dto.name ?? 'M3U',
-          active: true,
-        } as Partial<Playlist>);
-        await this.activateNew(userId, entity);
-        return entity;
-      } catch (e: any) {
-        this.logger.warn(`M3U directe KO (${e?.message}). On tente la découverte Xtream si identifiants fournis.`);
-      }
+      // Valide uniquement la M3U (pas de conversion Xtream ici)
+      const { entries } = await this.validateM3UNotEmpty(m3uUrl);
+      this.logger.log(`M3U validée (${entries} entrées)`);
 
-      // 2) fallback Xtream seulement si username/password présents
-      const username = (dto as any).username as string | undefined;
-      const password = (dto as any).password as string | undefined;
-      if (!username || !password) {
-        // Pas d'identifiants fournis → on enregistre au moins une piste XTREAM "publique"
-        const publicBase = this.sanitizePublicBaseUrl(m3uUrl);
-        const entity = this.repo.create({
-          user_id: userId,
-          type: 'XTREAM',
-          url: publicBase,
-          name: dto.name ?? `Xtream: ${stripProtocol(publicBase)}`,
-          active: true,
-        } as Partial<Playlist>);
-        await this.activateNew(userId, entity);
-        return entity;
-      }
-
-      // 3) Découverte Xtream depuis l'URL M3U (on en tirera juste le host)
-      const baseForDiscovery = this.hostFromMaybeUrl(m3uUrl);
-      return await this.linkXtreamFlow(userId, {
-        type: 'xtream',
-        base_url: baseForDiscovery,
-        username,
-        password,
-        name: dto.name,
-      } as LinkXtreamDto);
+      const entity = this.repo.create({
+        user_id: userId,
+        type: 'M3U',
+        url: m3uUrl,
+        name: (dto as any).name ?? 'M3U',
+        active: true,
+      } as Partial<Playlist>);
+      await this.activateNew(userId, entity);
+      return entity;
     }
 
-    // Mode xtream explicite
     if (dto.type === 'xtream') {
+      // Validation Xtream par player_api + enregistrement (sans M3U)
       return await this.linkXtreamFlow(userId, dto);
     }
 
+    // Cas M3U saisi avec identifiants: on NE “convertit” PAS en M3U depuis Xtream.
+    // Si l’utilisateur veut Xtream, il doit choisir type='xtream'. On reste explicite.
     throw new Error('Type de playlist inconnu');
   }
 
   // ---------------------------------------------------------------------------
-  // Flux XTREAM avec découverte + génération M3U
+  // Flux XTREAM : découverte + validation via player_api, pas de get.php ici
   // ---------------------------------------------------------------------------
   private async linkXtreamFlow(userId: string, dto: LinkXtreamDto): Promise<Playlist> {
     if (!dto.base_url || !dto.username || !dto.password) {
       throw new Error('Paramètres Xtream manquants');
     }
 
-    // 1) Découvrir détails via player_api.php
+    // 1) Découvrir et valider via player_api.php
     const details = await this.discoverXtreamDetails(dto.base_url, dto.username, dto.password);
     if (!details) {
-      throw new Error(`Impossible de découvrir le panel Xtream depuis "${dto.base_url}" (player_api KO sur toutes les bases)`);
+      throw new Error(`Impossible de découvrir/valider le panel Xtream depuis "${dto.base_url}"`);
     }
 
-    // 2) Construire des bases candidates pour get.php en utilisant server_info (protocol + ports)
-    const basesForM3U = this.buildBasesForGetPhp(details);
-
-    // 3) Construire et tester des candidats M3U
-    const candidates = this.buildM3UCandidates(basesForM3U, dto.username, dto.password);
-    let m3uOk = false;
-    for (const url of candidates) {
-      try {
-        const body = await this.fetchM3U(url);
-        if (body && body.includes('#EXTM3U')) {
-          this.logger.log(`M3U validée via Xtream: ${url}`);
-          m3uOk = true;
-          break;
-        }
-      } catch (err: any) {
-        this.logger.warn(`M3U candidate KO: ${url} -> ${err?.message}`);
-      }
-    }
-    if (!m3uOk) {
-      throw new Error('Impossible d’obtenir une M3U non vide via Xtream (tous les candidats KO)');
+    // Optionnel: vérifier statut utilisateur quand dispo
+    const status = String(details.userInfo?.status || '').toLowerCase();
+    if (status && status !== 'active' && status !== 'true') {
+      this.logger.warn(`Xtream user status non actif: "${details.userInfo?.status}"`);
     }
 
-    // 4) Enregistrer la playlist XTREAM en gardant une base "publique" (sans port/chemin)
-    const publicBase = this.sanitizePublicBaseUrl(details.chosenBase || basesForM3U[0] || dto.base_url);
+    // 2) Choisir un protocole “public” sans port (ports facultatifs côté UX)
+    const preferHttps = String(details.serverInfo?.server_protocol || '').toLowerCase() === 'https';
+    const protocol = preferHttps ? 'https' : 'http';
+    const publicBase = `${protocol}://${details.host}`;
+
+    // 3) Enregistrer la playlist XTREAM (pas de M3U)
     const entity = this.repo.create({
       user_id: userId,
       type: 'XTREAM',
-      url: publicBase,
-      name: dto.name ?? `Xtream: ${stripProtocol(publicBase)}`,
+      url: publicBase, // protocole + host (sans port/chemin)
+      name: dto.name ?? `Xtream: ${details.host}`,
       active: true,
     } as Partial<Playlist>);
     await this.activateNew(userId, entity);
@@ -145,7 +105,7 @@ export class PlaylistsService {
   }
 
   // ---------------------------------------------------------------------------
-  // Validation M3U directe robuste (TLS tolérant + fallback http)
+  // Validation M3U (TLS tolérant + fallback http)
   // ---------------------------------------------------------------------------
   private async validateM3UNotEmpty(url: string): Promise<{ entries: number }> {
     const doFetch = async (u: string) =>
@@ -163,28 +123,23 @@ export class PlaylistsService {
 
     let res = await doFetch(url);
 
-    // Fallback si protocole TLS foireux et l'URL est en https:// → réessayer en http://
-    const body0 = String(res.data ?? '');
-    const looksBad = res.status >= 400 || !body0.includes('#EXTM3U');
-    if (looksBad && url.startsWith('https://')) {
+    // Fallback: si HTTPS casse, retenter en HTTP
+    const bad = res.status >= 400 || !String(res.data ?? '').includes('#EXTM3U');
+    if (bad && url.startsWith('https://')) {
       const httpUrl = url.replace(/^https:\/\//i, 'http://');
       this.logger.warn(`HTTPS KO sur ${url}. Tentative en clair: ${httpUrl}`);
-      try {
-        res = await doFetch(httpUrl);
-      } catch {}
+      try { res = await doFetch(httpUrl); } catch {}
     }
 
     const body = String(res.data ?? '');
-    if (!body.includes('#EXTM3U')) {
-      throw new Error(`Lecture M3U échouée (HTTP ${res.status})`);
-    }
+    if (!body.includes('#EXTM3U')) throw new Error(`Lecture M3U échouée (HTTP ${res.status})`);
     const entries = (body.match(/^#EXTINF/igm) || []).length;
     if (entries === 0) throw new Error('M3U vide');
     return { entries };
   }
 
   // ---------------------------------------------------------------------------
-  // Découverte panel Xtream via player_api.php (+ ports)
+  // Découverte/Validation Xtream via player_api.php (ports auto)
   // ---------------------------------------------------------------------------
 
   /** Extrait un hostname depuis une URL complète ou un host brut. */
@@ -198,7 +153,7 @@ export class PlaylistsService {
     }
   }
 
-  /** Génère les bases candidates pour player_api.php (http/https + ports courants). */
+  /** Bases candidates pour player_api.php (http/https + ports courants). */
   private xtreamCandidateBasesForApi(hostOrUrl: string): string[] {
     const host = this.hostFromMaybeUrl(hostOrUrl);
     const bases = [
@@ -234,11 +189,12 @@ export class PlaylistsService {
     }
   }
 
-  /** Tente player_api.php; renvoie les détails utiles à la construction de get.php */
+  /** Découvre un endpoint player_api fonctionnel + retourne infos utiles. */
   private async discoverXtreamDetails(baseHostOrUrl: string, username: string, password: string): Promise<{
     host: string;
-    chosenBase: string | null;
+    chosenBase: string;
     serverInfo?: any;
+    userInfo?: any;
   } | null> {
     const host = this.hostFromMaybeUrl(baseHostOrUrl);
     const candidates = this.xtreamCandidateBasesForApi(host);
@@ -249,76 +205,12 @@ export class PlaylistsService {
       const j = await this.fetchJson(url);
       if (j && typeof j === 'object' && j.user_info && j.server_info) {
         this.logger.log(`XTREAM discovery OK via ${base}`);
-        return { host, chosenBase: base, serverInfo: j.server_info };
+        return { host, chosenBase: base, serverInfo: j.server_info, userInfo: j.user_info };
       }
       if (j?.__error) this.logger.warn(`XTREAM discovery error on ${url}: ${j.__error}`);
       else if (j?.__status) this.logger.warn(`XTREAM discovery KO ${url} (HTTP ${j.__status})`);
     }
     return null;
-  }
-
-  /** Construit un tableau de bases pour get.php à partir de server_info + host. */
-  private buildBasesForGetPhp(details: { host: string; chosenBase: string | null; serverInfo?: any }): string[] {
-    const bases: string[] = [];
-    const si = details.serverInfo || {};
-    // 1) server_info.url (peut être "host:port" ou "http(s)://host:port[/path]")
-    if (si.url && typeof si.url === 'string') {
-      try {
-        let u = si.url.trim();
-        if (!/^https?:\/\//i.test(u)) u = `http://${u}`;
-        const parsed = new URL(u);
-        bases.push(`${parsed.protocol}//${parsed.hostname}${parsed.port ? ':' + parsed.port : ''}`);
-      } catch {
-        // ignore
-      }
-    }
-    // 2) server_protocol + http_port / https_port
-    const proto = (si.server_protocol || '').toLowerCase(); // 'http' ou 'https'
-    const httpPort = String(si.port || si.http_port || '').trim();
-    const httpsPort = String(si.https_port || '').trim();
-    if (proto === 'http' && httpPort) bases.push(`http://${details.host}:${httpPort}`);
-    if (proto === 'https' && (httpsPort || httpPort)) {
-      const p = httpsPort || httpPort;
-      bases.push(`https://${details.host}:${p}`);
-    }
-    // 3) base utilisée pour player_api + fallback simples
-    if (details.chosenBase) bases.push(details.chosenBase);
-    bases.push(`https://${details.host}`);
-    bases.push(`http://${details.host}`);
-
-    // Uniques + sans trailing slash
-    const unique = [...new Set(bases.map((b) => b.replace(/\/+$/, '')))];
-    this.logger.log(`XTREAM get.php bases candidates: ${unique.join(', ')}`);
-    return unique;
-  }
-
-  /** Construit la liste des URLs complètes get.php à tester. */
-  private buildM3UCandidates(bases: string[], username: string, password: string): string[] {
-    const qs = `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
-    const urls: string[] = [];
-    for (const base of bases) {
-      urls.push(`${base}/get.php?${qs}&type=m3u_plus&output=ts`);
-      urls.push(`${base}/get.php?${qs}&type=m3u_plus&output=m3u8`);
-      urls.push(`${base}/get.php?${qs}&type=m3u&output=ts`);
-      urls.push(`${base}/get.php?${qs}&type=m3u&output=m3u8`);
-    }
-    return [...new Set(urls)];
-  }
-
-  private async fetchM3U(url: string): Promise<string> {
-    const res = await axios.get(url, {
-      timeout: 12000,
-      maxRedirects: 5,
-      responseType: 'text',
-      validateStatus: () => true,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120 Safari/537.36',
-        Accept: '*/*',
-      },
-      httpsAgent: new https.Agent({ rejectUnauthorized: false }),
-    });
-    if (res.status === 200 && typeof res.data === 'string' && res.data.includes('#EXTM3U')) return res.data;
-    throw new Error(`Lecture M3U échouée (HTTP ${res.status})`);
   }
 
   // ---------------------------------------------------------------------------
@@ -349,7 +241,6 @@ export class PlaylistsService {
     let h = stripProtocol(raw.trim())
       .replace(/\/.*$/, '') // retire tout chemin
       .replace(/:\d+$/, ''); // retire port
-    // Force https sur le public si on avait https quelque part, sinon http
     if (/^https:\/\//i.test(raw)) return `https://${h}`;
     return `http://${h}`;
   }
