@@ -291,6 +291,21 @@ export class PlaylistsService {
     if (/^https:\/\//i.test(raw)) return `https://${h}`;
     return `http://${h}`;
   }
+
+  // ---------------------------------------------------------------------------
+  // Compat: méthodes attendues par le controller
+  // ---------------------------------------------------------------------------
+  async getForUser(userId: string): Promise<Playlist[]> {
+    return await this.repo.find({ where: { user_id: userId }, order: { created_at: 'DESC' } });
+  }
+
+  async link(userId: string, dto: LinkPlaylistDto): Promise<Playlist> {
+    return await this.linkPlaylist(userId, dto);
+  }
+
+  async unlink(userId: string): Promise<void> {
+    await this.repo.update({ user_id: userId, active: true }, { active: false });
+  }
 }
 
 // Utilitaire hors classe
