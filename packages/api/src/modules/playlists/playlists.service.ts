@@ -55,7 +55,7 @@ export class PlaylistsService {
   private async activateNew(userId: string, entity: Playlist): Promise<Playlist> {
     await this.deactivateAll(userId);
     entity.active = true;
-    return this.repo.save(entity); // <— bien un Playlist, pas un array
+    return this.repo.save(entity);
   }
 
   /** Lier playlist M3U ou Xtream */
@@ -63,7 +63,7 @@ export class PlaylistsService {
     if (!userId) throw new Error('userId manquant');
 
     if (dto.type === 'm3u') {
-      const m3uUrl = this.normalizeM3UUrl(dto.m3u_url ?? dto.url);
+      const m3uUrl = this.normalizeM3UUrl(dto.m3u_url ?? dto.url ?? '');
       const entity = this.repo.create({
         user_id: userId,
         type: 'M3U',
@@ -76,8 +76,13 @@ export class PlaylistsService {
       return { ok: true };
     }
 
-    // XTREAM
+    // xtream
+    if (!dto.base_url || !dto.username || !dto.password) {
+      throw new Error('Les champs base_url, username et password sont requis pour Xtream.');
+    }
+
     const { base } = await this.assertValidXtream(dto.base_url, dto.username, dto.password);
+
     // Convertit Xtream -> M3U pour un pipeline unique
     const m3uUrl =
       `${base}/get.php?username=${encodeURIComponent(dto.username)}` +
@@ -93,12 +98,6 @@ export class PlaylistsService {
 
     await this.activateNew(userId, entity);
     this.logger.log(`XTREAM lié (converti M3U) pour user=${userId}`);
-    return { ok: true };
-  }
-
-  /** Délier (= désactiver la playlist active) */
-  async unlink(userId: string): Promise<{ ok: true }> {
-    await this.deactivateAll(userId);
     return { ok: true };
   }
 
