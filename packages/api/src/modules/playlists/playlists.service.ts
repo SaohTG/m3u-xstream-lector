@@ -122,8 +122,14 @@ export class PlaylistsService {
     return await this.linkXtreamFlow(userId, dto as LinkXtreamDto);
   }
 
-  /** Sous-routine: liaison Xtream avec validation et fallback M3U/XTREAM */
-  private async linkXtreamFlow(userId: string, dto: LinkXtreamDto): Promise<{ ok: true }> {
+  /**
+   * Sous-routine: liaison Xtream avec validation et fallback M3U/XTREAM.
+   * Note: n’exige pas le champ "type" pour éviter les erreurs TS lors des appels internes.
+   */
+  private async linkXtreamFlow(
+    userId: string,
+    dto: { base_url: string; username: string; password: string; name?: string }
+  ): Promise<{ ok: true }> {
     if (!dto.base_url || !dto.username || !dto.password) {
       throw new Error('Les champs base_url, username et password sont requis pour Xtream.');
     }
