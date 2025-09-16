@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import axios, { AxiosRequestConfig } from 'axios';
+import * as https from 'https';
 import { Playlist } from './playlist.entity';
 
 type LinkM3UDto = { type: 'm3u'; m3u_url?: string; url?: string; name?: string };
@@ -14,6 +15,9 @@ export class PlaylistsService {
 
   constructor(@InjectRepository(Playlist) private readonly repo: Repository<Playlist>) {}
 
+  // ----------- Query -----------
+
+  /** Retourne la playlist active + la liste complète pour l’utilisateur */
   async me(userId: string) {
     const [active, all] = await Promise.all([
       this.getActiveForUser(userId),
@@ -22,6 +26,7 @@ export class PlaylistsService {
     return { active, all };
   }
 
+  /** Toutes les playlists d’un user */
   async getForUser(userId: string): Promise<Playlist[]> {
     return this.repo.find({
       where: { user_id: userId } as any,
@@ -29,6 +34,7 @@ export class PlaylistsService {
     });
   }
 
+  /** Playlist active d’un user */
   async getActiveForUser(userId: string): Promise<Playlist | null> {
     const current = await this.repo.findOne({
       where: { user_id: userId, active: true } as any,
@@ -37,6 +43,9 @@ export class PlaylistsService {
     return current ?? null;
   }
 
+  // ----------- Mutations -----------
+
+  /** Désactive toutes les playlists de l’utilisateur */
   private async deactivateAll(userId: string): Promise<void> {
     await this.repo
       .createQueryBuilder()
@@ -47,12 +56,14 @@ export class PlaylistsService {
       .execute();
   }
 
+  /** Active la nouvelle playlist (désactive les autres) */
   private async activateNew(userId: string, entity: Playlist): Promise<Playlist> {
     await this.deactivateAll(userId);
     entity.active = true;
     return this.repo.save(entity);
   }
 
+  /** Lier une playlist: M3U directe ou Xtream (converti en M3U) */
   async link(userId: string, dto: LinkPlaylistDto): Promise<{ ok: true }> {
     if (!userId) throw new Error('userId manquant');
 
@@ -72,7 +83,7 @@ export class PlaylistsService {
       return { ok: true };
     }
 
-    // xtream
+    // Xtream -> tester player_api puis construire une URL M3U fonctionnelle
     if (!dto.base_url || !dto.username || !dto.password) {
       throw new Error('Les champs base_url, username et password sont requis pour Xtream.');
     }
@@ -85,7 +96,7 @@ export class PlaylistsService {
 
     const entity = this.repo.create({
       user_id: userId,
-      type: 'M3U',
+      type: 'M3U', // on consomme au format M3U
       url: workingUrl,
       name: dto.name ?? `Xtream: ${stripProtocol(base)}`,
       active: true,
@@ -96,12 +107,13 @@ export class PlaylistsService {
     return { ok: true };
   }
 
+  /** Délier (= désactiver la playlist active) */
   async unlink(userId: string): Promise<{ ok: true }> {
     await this.deactivateAll(userId);
     return { ok: true };
   }
 
-  // ---------- Helpers ----------
+  // ----------- Helpers -----------
 
   private normalizeM3UUrl(raw: string): string {
     let u = (raw || '').trim();
@@ -127,12 +139,13 @@ export class PlaylistsService {
         'User-Agent': 'VLC/3.0.18 LibVLC/3.0.18',
         Accept: 'application/json, */*',
       },
-      httpsAgent: new (require('https').Agent)({ rejectUnauthorized: false }),
+      httpsAgent: new https.Agent({ rejectUnauthorized: false }),
       validateStatus: () => true,
     };
     return axios.get(url, cfg);
   }
 
+  /** Vérifie l’accessibilité Xtream (HTTP/HTTPS) et l’état du compte via player_api.php */
   private async assertValidXtream(baseUrlRaw: string, username: string, password: string) {
     const allowWithout = (process.env.ALLOW_XTREAM_LINK_WITHOUT_VALIDATE ?? 'false') === 'true';
 
@@ -182,7 +195,8 @@ export class PlaylistsService {
     throw new Error(`Xtream non joignable (HTTP ${lastStatus || '???'})`);
   }
 
-  private async validateM3UNotEmpty(url: string): Promise<{ entries: number, body: string }> {
+  /** Télécharge une M3U et retourne le nombre d’entrées détectées */
+  private async validateM3UNotEmpty(url: string): Promise<{ entries: number; body: string }> {
     const cfg: AxiosRequestConfig = {
       timeout: 15000,
       maxRedirects: 2,
@@ -190,7 +204,7 @@ export class PlaylistsService {
         'User-Agent': 'VLC/3.0.18 LibVLC/3.0.18',
         Accept: 'audio/x-mpegurl, application/vnd.apple.mpegurl, */*',
       },
-      httpsAgent: new (require('https').Agent)({ rejectUnauthorized: false }),
+      httpsAgent: new https.Agent({ rejectUnauthorized: false }),
       responseType: 'text',
       validateStatus: () => true,
     };
@@ -205,17 +219,20 @@ export class PlaylistsService {
     return { entries, body };
   }
 
-  private async buildXtreamM3UWithFallback(base: string, username: string, password: string): Promise<{ workingUrl: string, entries: number }> {
+  /**
+   * Construit l’URL M3U Xtream qui fonctionne réellement (avec fallback):
+   * - teste http et https
+   * - teste chemins: /get.php, /playlist/get.php, /panel/get.php
+   * - teste paramètres: type=m3u_plus|m3u, output=m3u8|ts, et sans type/output
+   */
+  private async buildXtreamM3UWithFallback(base: string, username: string, password: string): Promise<{ workingUrl: string; entries: number }> {
     const switchProtocol = (u: string) =>
       u.startsWith('https://') ? u.replace(/^https:\/\//i, 'http://') : u.replace(/^http:\/\//i, 'https://');
 
     const uniq = <T>(arr: T[]) => Array.from(new Set(arr));
 
     const bases = uniq([base, switchProtocol(base)]);
-
-    // Certains panels exposent get.php sous /playlist ou /panel
     const paths = ['', '/playlist', '/panel'];
-
     const q = `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
 
     const urlCandidates: string[] = [];
@@ -248,6 +265,7 @@ export class PlaylistsService {
   }
 }
 
+// Utilitaires hors classe
 function stripProtocol(u: string) {
   return u.replace(/^https?:\/\//i, '');
 }
