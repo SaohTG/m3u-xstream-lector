@@ -68,29 +68,69 @@ export class PlaylistsService {
     if (!userId) throw new Error('userId manquant');
 
     if (dto.type === 'm3u') {
-      const m3uUrl = this.normalizeM3UUrl(dto.m3u_url ?? dto.url ?? '');
-      const { entries } = await this.validateM3UNotEmpty(m3uUrl);
-      this.logger.log(`M3U validée: ${entries} entrées détectées`);
-      const entity = this.repo.create({
-        user_id: userId,
-        type: 'M3U',
-        url: m3uUrl, // Conserve l'URL M3U telle quelle
-        name: dto.name ?? 'M3U',
-        active: true,
-      } as Partial<Playlist>);
-      await this.activateNew(userId, entity);
-      this.logger.log(`M3U liée pour user=${userId}`);
-      return { ok: true };
+      const rawUrl = dto.m3u_url ?? dto.url ?? '';
+      const m3uUrl = this.normalizeM3UUrl(rawUrl);
+
+      // 1) Tentative M3U classique
+      try {
+        const { entries } = await this.validateM3UNotEmpty(m3uUrl);
+        this.logger.log(`M3U validée: ${entries} entrées détectées`);
+        const entity = this.repo.create({
+          user_id: userId,
+          type: 'M3U',
+          url: m3uUrl,
+          name: dto.name ?? 'M3U',
+          active: true,
+        } as Partial<Playlist>);
+        await this.activateNew(userId, entity);
+        this.logger.log(`M3U liée pour user=${userId}`);
+        return { ok: true };
+      } catch (e: any) {
+        // 2) Si l’URL ressemble à un domaine Xtream (pas .m3u/.m3u8, pas get.php), tenter fallback Xtream
+        const looksLikeXtreamBase =
+          !/get\.php/i.test(m3uUrl) && !/\.m3u8?(\?|$)/i.test(m3uUrl);
+
+        if (looksLikeXtreamBase) {
+          const anyDto = dto as any;
+          const username: string | undefined = anyDto.username;
+          const password: string | undefined = anyDto.password;
+
+          if (username && password) {
+            this.logger.warn(
+              `L’URL fournie n’est pas une M3U valide (${e?.message}). Tentative de liaison en mode XTREAM avec base="${m3uUrl}".`
+            );
+            return await this.linkXtreamFlow(userId, {
+              base_url: m3uUrl,
+              username,
+              password,
+              name: dto.name,
+            });
+          }
+
+          // pas d’identifiants -> message explicite
+          throw new Error(
+            'L’URL fournie ne pointe pas vers une playlist M3U (HTTP 404 ou format invalide). Utilisez le mode Xtream et fournissez username/password.'
+          );
+        }
+
+        // 3) Sinon, on remonte l’erreur d’origine M3U
+        throw e;
+      }
     }
 
-    // Xtream -> tester player_api puis tenter de trouver une URL M3U fonctionnelle
+    // Flow Xtream explicite
+    return await this.linkXtreamFlow(userId, dto as LinkXtreamDto);
+  }
+
+  /** Sous-routine: liaison Xtream avec validation et fallback M3U/XTREAM */
+  private async linkXtreamFlow(userId: string, dto: LinkXtreamDto): Promise<{ ok: true }> {
     if (!dto.base_url || !dto.username || !dto.password) {
       throw new Error('Les champs base_url, username et password sont requis pour Xtream.');
     }
 
     const { base } = await this.assertValidXtream(dto.base_url, dto.username, dto.password);
 
-    // On tente de récupérer une M3U. En cas d’échec (404), on n’échoue plus la liaison.
+    // On tente d’obtenir une M3U. En cas d’échec total, on enregistre en type XTREAM.
     let workingUrl: string | undefined;
     let entries = 0;
     try {
@@ -104,7 +144,7 @@ export class PlaylistsService {
       );
     }
 
-    // Enregistre selon ce qu’on a trouvé:
+    // Enregistre:
     // - Si une M3U fonctionne: type=M3U, url=workingUrl
     // - Sinon: type=XTREAM, url=base publique sans port/chemin (ex: https://noos.vip)
     const publicBase = this.sanitizePublicBaseUrl(base);
