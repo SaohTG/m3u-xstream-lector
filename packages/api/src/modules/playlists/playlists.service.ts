@@ -74,7 +74,7 @@ export class PlaylistsService {
       const entity = this.repo.create({
         user_id: userId,
         type: 'M3U',
-        url: m3uUrl,
+        url: m3uUrl, // Conserve l'URL M3U telle quelle (dites-moi si vous la voulez aussi normalisée)
         name: dto.name ?? 'M3U',
         active: true,
       } as Partial<Playlist>);
@@ -83,7 +83,7 @@ export class PlaylistsService {
       return { ok: true };
     }
 
-    // Xtream -> tester player_api puis construire une URL M3U fonctionnelle
+    // Xtream -> tester player_api puis trouver une URL M3U fonctionnelle
     if (!dto.base_url || !dto.username || !dto.password) {
       throw new Error('Les champs base_url, username et password sont requis pour Xtream.');
     }
@@ -94,16 +94,20 @@ export class PlaylistsService {
     const { workingUrl, entries } = await this.buildXtreamM3UWithFallback(base, dto.username, dto.password);
     this.logger.log(`XTREAM M3U choisie: ${workingUrl} (${entries} entrées)`);
 
+    // Enregistre UNIQUEMENT l’URL publique sans port ni chemin, en HTTPS (ex: https://noos.vip)
+    const publicBase = this.sanitizePublicBaseUrl(base);
+
     const entity = this.repo.create({
       user_id: userId,
-      type: 'M3U', // on consomme au format M3U
-      url: workingUrl,
-      name: dto.name ?? `Xtream: ${stripProtocol(base)}`,
+      type: 'M3U', // côté app on consomme du M3U
+      url: publicBase, // Exigence: pas de port, pas de chemin
+      name: dto.name ?? `Xtream: ${stripProtocol(publicBase)}`,
       active: true,
     } as Partial<Playlist>);
 
     await this.activateNew(userId, entity);
-    this.logger.log(`XTREAM lié (converti M3U) pour user=${userId}`);
+    this.logger.log(`XTREAM lié (public=${publicBase}, validé via get.php)`);
+
     return { ok: true };
   }
 
@@ -129,6 +133,18 @@ export class PlaylistsService {
     h = h.replace(/\s+/g, '').replace(/\/+$/, '');
     if (!/^https?:\/\//i.test(h)) h = `http://${h}`;
     return h;
+  }
+
+  /** Produit l'URL publique sans port ni chemin, forcée en HTTPS (ex: https://noos.vip) */
+  private sanitizePublicBaseUrl(input: string): string {
+    try {
+      const u = new URL(input);
+      return `https://${u.hostname}`;
+    } catch {
+      // fallback minimal
+      const cleaned = input.replace(/^https?:\/\//i, '').split('/')[0].split(':')[0];
+      return `https://${cleaned}`;
+    }
   }
 
   private async tryPlayerApi(base: string, username: string, password: string) {
@@ -161,18 +177,16 @@ export class PlaylistsService {
     }
 
     let lastStatus = 0;
-    let lastBody: any = null;
 
     for (const base of candidates) {
       try {
         const res = await this.tryPlayerApi(base, username, password);
         lastStatus = res.status;
-        lastBody = res.data;
 
-        if (res.status === 200 && lastBody && typeof lastBody === 'object' && lastBody.user_info) {
-          const status = String(lastBody.user_info?.status || '').toLowerCase();
+        if (res.status === 200 && res.data && typeof res.data === 'object' && res.data.user_info) {
+          const status = String(res.data.user_info?.status || '').toLowerCase();
           if (status !== 'active') {
-            throw new Error(`Compte Xtream inactif (status="${lastBody.user_info?.status}")`);
+            throw new Error(`Compte Xtream inactif (status="${res.data.user_info?.status}")`);
           }
           return { base };
         }
@@ -303,7 +317,7 @@ export class PlaylistsService {
       // On essaie d'abord avec le chemin fourni par l'utilisateur (s'il existe)
       const rootsToTry = basePath ? [`${origin}${basePath}`] : [`${origin}`];
 
-      // Puis on ajoute les sous-chemins génériques en plus (en évitant doublons)
+      // Puis on ajoute les sous-chemins génériques (sans doublons)
       for (const p of extraPaths) {
         const r = `${origin}${p}`;
         if (!rootsToTry.includes(r)) rootsToTry.push(r);
