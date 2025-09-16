@@ -90,7 +90,7 @@ export class PlaylistsService {
 
     const { base } = await this.assertValidXtream(dto.base_url, dto.username, dto.password);
 
-    // Tente plusieurs variantes (protocole, chemins, paramètres) jusqu’à trouver une M3U non vide
+    // Tente plusieurs variantes (protocole, ports, chemins, paramètres) jusqu’à trouver une M3U non vide
     const { workingUrl, entries } = await this.buildXtreamM3UWithFallback(base, dto.username, dto.password);
     this.logger.log(`XTREAM M3U choisie: ${workingUrl} (${entries} entrées)`);
 
@@ -220,10 +220,11 @@ export class PlaylistsService {
   }
 
   /**
-   * Construit l’URL M3U Xtream qui fonctionne réellement (avec fallback):
-   * - teste http et https
-   * - teste chemins: /get.php, /playlist/get.php, /panel/get.php
-   * - teste paramètres: type=m3u_plus|m3u, output=m3u8|ts, et sans type/output
+   * Construit l’URL M3U Xtream qui fonctionne réellement (avec fallback élargi):
+   * - protocoles: http et https (switch auto)
+   * - ports: défaut + :80, :8080, :8000, :25461 (ports fréquents)
+   * - chemins: /get.php, /playlist/get.php, /panel/get.php, /player/get.php, /xc/get.php, /xtreamcodes/get.php, /streaming/get.php, /cms/get.php
+   * - paramètres: type=m3u_plus|m3u, output=m3u8|ts, et sans type/output
    */
   private async buildXtreamM3UWithFallback(base: string, username: string, password: string): Promise<{ workingUrl: string; entries: number }> {
     const switchProtocol = (u: string) =>
@@ -231,12 +232,32 @@ export class PlaylistsService {
 
     const uniq = <T>(arr: T[]) => Array.from(new Set(arr));
 
-    const bases = uniq([base, switchProtocol(base)]);
-    const paths = ['', '/playlist', '/panel'];
+    // Nettoie trailing slash
+    const clean = (u: string) => u.replace(/\/+$/, '');
+
+    const bases = uniq([clean(base), clean(switchProtocol(base))]);
+
+    // Ajoute variantes de ports
+    const commonPorts = ['', ':80', ':8080', ':8000', ':25461'];
+    const withPorts: string[] = [];
+    for (const b of bases) {
+      const url = new URL(b);
+      const host = url.origin.replace(/\/+$/, '');
+      for (const port of commonPorts) {
+        // Évite doubler le port si déjà présent
+        if (port && /:\d+$/.test(host)) {
+          withPorts.push(host); // garde tel quel
+        } else {
+          withPorts.push(port ? host.replace(/(:\d+)?$/, '') + port : host);
+        }
+      }
+    }
+
+    const paths = ['', '/playlist', '/panel', '/player', '/xc', '/xtreamcodes', '/streaming', '/cms'];
     const q = `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
 
     const urlCandidates: string[] = [];
-    for (const b of bases) {
+    for (const b of uniq(withPorts)) {
       for (const p of paths) {
         const root = `${b}${p}`;
         urlCandidates.push(
@@ -246,10 +267,12 @@ export class PlaylistsService {
           `${root}/get.php?${q}&type=m3u&output=ts`,
           `${root}/get.php?${q}&type=m3u_plus`,
           `${root}/get.php?${q}&type=m3u`,
-          `${root}/get.php?${q}` // sans params additionnels
+          `${root}/get.php?${q}`
         );
       }
     }
+
+    this.logger.log(`buildXtreamM3UWithFallback: ${urlCandidates.length} candidates à tester (ex: ${urlCandidates[0]})`);
 
     let lastErr: any = null;
     for (const url of urlCandidates) {
