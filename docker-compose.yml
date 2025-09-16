@@ -6,7 +6,7 @@ services:
     container_name: iptv-saas-db
     environment:
       POSTGRES_USER: novastream
-      POSTGRES_PASSWORD: novastream
+      POSTGRES_PASSWORD: c6?NJ*Y3oqd!LUU.!3ct
       POSTGRES_DB: novastream
       TZ: Europe/Brussels
     volumes:
@@ -54,7 +54,7 @@ services:
       DB_HOST: db
       DB_PORT: 5432
       DB_USER: novastream
-      DB_PASS: novastream
+      DB_PASS: c6?NJ*Y3oqd!LUU.!3ct
       DB_NAME: novastream
 
       # --- TypeORM ---
