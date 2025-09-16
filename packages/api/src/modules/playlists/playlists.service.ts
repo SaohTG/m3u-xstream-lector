@@ -5,7 +5,7 @@ import axios, { AxiosRequestConfig, AxiosResponse } from 'axios';
 import * as https from 'https';
 import { Playlist } from './playlist.entity';
 
-type LinkM3UDto = { type: 'm3u'; m3u_url?: string; url?: string; name?: string };
+type LinkM3UDto = { type: 'm3u'; m3u_url?: string; url?: string; name?: string; username?: string; password?: string };
 type LinkXtreamDto = { type: 'xtream'; base_url: string; username: string; password: string; name?: string };
 export type LinkPlaylistDto = LinkM3UDto | LinkXtreamDto;
 
@@ -86,18 +86,17 @@ export class PlaylistsService {
         this.logger.log(`M3U liée pour user=${userId}`);
         return { ok: true };
       } catch (e: any) {
-        // 2) Si l’URL ressemble à un domaine Xtream (pas .m3u/.m3u8, pas get.php), tenter fallback Xtream
+        // 2) Si l’URL ressemble à une base Xtream (pas de .m3u/.m3u8 ni get.php), bascule:
         const looksLikeXtreamBase =
           !/get\.php/i.test(m3uUrl) && !/\.m3u8?(\?|$)/i.test(m3uUrl);
 
         if (looksLikeXtreamBase) {
-          const anyDto = dto as any;
-          const username: string | undefined = anyDto.username;
-          const password: string | undefined = anyDto.password;
+          const username = (dto as any).username as string | undefined;
+          const password = (dto as any).password as string | undefined;
 
           if (username && password) {
             this.logger.warn(
-              `L’URL fournie n’est pas une M3U valide (${e?.message}). Tentative de liaison en mode XTREAM avec base="${m3uUrl}".`
+              `URL non M3U (${e?.message}). Tentative de liaison en mode XTREAM avec base="${m3uUrl}".`
             );
             return await this.linkXtreamFlow(userId, {
               base_url: m3uUrl,
@@ -107,10 +106,20 @@ export class PlaylistsService {
             });
           }
 
-          // pas d’identifiants -> message explicite
-          throw new Error(
-            'L’URL fournie ne pointe pas vers une playlist M3U (HTTP 404 ou format invalide). Utilisez le mode Xtream et fournissez username/password.'
+          // Pas d’identifiants fournis: ne pas échouer; enregistrer en XTREAM avec domaine public
+          const publicBase = this.sanitizePublicBaseUrl(m3uUrl);
+          const entity = this.repo.create({
+            user_id: userId,
+            type: 'XTREAM',
+            url: publicBase, // Exigence: pas de port ni chemin
+            name: dto.name ?? `Xtream: ${stripProtocol(publicBase)}`,
+            active: true,
+          } as Partial<Playlist>);
+          await this.activateNew(userId, entity);
+          this.logger.warn(
+            `Aucune M3U et pas d’identifiants fournis. Abonnement enregistré en XTREAM avec base publique=${publicBase}.`
           );
+          return { ok: true };
         }
 
         // 3) Sinon, on remonte l’erreur d’origine M3U
@@ -124,7 +133,7 @@ export class PlaylistsService {
 
   /**
    * Sous-routine: liaison Xtream avec validation et fallback M3U/XTREAM.
-   * Note: n’exige pas le champ "type" pour éviter les erreurs TS lors des appels internes.
+   * Note: n’exige pas le champ "type" pour permettre l’appel interne depuis le fallback M3U.
    */
   private async linkXtreamFlow(
     userId: string,
