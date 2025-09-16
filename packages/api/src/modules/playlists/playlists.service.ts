@@ -14,7 +14,7 @@ export class PlaylistsService {
 
   constructor(@InjectRepository(Playlist) private readonly repo: Repository<Playlist>) {}
 
-  /** Retourne la playlist active + la liste complète pour l’utilisateur (pour /playlists/me) */
+  /** Retourne la playlist active + la liste complète pour l’utilisateur */
   async me(userId: string) {
     const [active, all] = await Promise.all([
       this.getActiveForUser(userId),
@@ -98,6 +98,12 @@ export class PlaylistsService {
 
     await this.activateNew(userId, entity);
     this.logger.log(`XTREAM lié (converti M3U) pour user=${userId}`);
+    return { ok: true };
+  }
+
+  /** Délier (= désactiver la playlist active) */
+  async unlink(userId: string): Promise<{ ok: true }> {
+    await this.deactivateAll(userId);
     return { ok: true };
   }
 
