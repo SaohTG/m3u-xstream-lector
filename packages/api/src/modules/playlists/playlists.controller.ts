@@ -22,7 +22,7 @@ export class PlaylistsController {
   @Post('link')
   async link(@Req() req: Request, @Body() dto: any) {
     const user: any = req.user;
-    // dto peut être { type:'M3U', url } ou { type:'XTREAM', host, username, password }
+    // dto attendu: { type:'m3u', m3u_url|url } ou { type:'xtream', base_url, username, password, name? }
     await this.svc.link(user.id, dto);
     return { ok: true };
   }
