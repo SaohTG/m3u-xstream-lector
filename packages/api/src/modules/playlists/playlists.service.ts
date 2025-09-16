@@ -14,7 +14,7 @@ export class PlaylistsService {
 
   constructor(@InjectRepository(Playlist) private readonly repo: Repository<Playlist>) {}
 
-  /** Retourne la playlist active + la liste complète pour l’utilisateur */
+  /** Retourne la playlist active + la liste complète pour l’utilisateur (pour /playlists/me) */
   async me(userId: string) {
     const [active, all] = await Promise.all([
       this.getActiveForUser(userId),
@@ -64,6 +64,9 @@ export class PlaylistsService {
 
     if (dto.type === 'm3u') {
       const m3uUrl = this.normalizeM3UUrl(dto.m3u_url ?? dto.url ?? '');
+      // On peut valider qu’elle n’est pas vide pour aider au debug
+      const { entries } = await this.validateM3UNotEmpty(m3uUrl);
+      this.logger.log(`M3U validée: ${entries} entrées détectées`);
       const entity = this.repo.create({
         user_id: userId,
         type: 'M3U',
@@ -83,15 +86,14 @@ export class PlaylistsService {
 
     const { base } = await this.assertValidXtream(dto.base_url, dto.username, dto.password);
 
-    // Convertit Xtream -> M3U pour un pipeline unique
-    const m3uUrl =
-      `${base}/get.php?username=${encodeURIComponent(dto.username)}` +
-      `&password=${encodeURIComponent(dto.password)}&type=m3u_plus&output=m3u8`;
+    // Tente plusieurs variantes get.php jusqu’à trouver une playlist non vide
+    const { workingUrl, entries } = await this.buildXtreamM3UWithFallback(base, dto.username, dto.password);
+    this.logger.log(`XTREAM M3U choisie: ${workingUrl} (${entries} entrées)`);
 
     const entity = this.repo.create({
       user_id: userId,
-      type: 'M3U', // on importe au format M3U
-      url: m3uUrl,
+      type: 'M3U', // on importe/consomme au format M3U
+      url: workingUrl,
       name: dto.name ?? `Xtream: ${stripProtocol(base)}`,
       active: true,
     } as Partial<Playlist>);
@@ -187,6 +189,53 @@ export class PlaylistsService {
     if (lastStatus === 401) throw new Error('Xtream identifiants invalides (HTTP 401)');
     if (lastStatus === 403) throw new Error('Xtream inaccessible (HTTP 403) — WAF/filtrage IP probable');
     throw new Error(`Xtream non joignable (HTTP ${lastStatus || '???'})`);
+  }
+
+  /** Télécharge une M3U et retourne le nombre d’entrées détectées */
+  private async validateM3UNotEmpty(url: string): Promise<{ entries: number, body: string }> {
+    const cfg: AxiosRequestConfig = {
+      timeout: 15000,
+      maxRedirects: 2,
+      headers: {
+        'User-Agent': 'VLC/3.0.18 LibVLC/3.0.18',
+        Accept: 'audio/x-mpegurl, application/vnd.apple.mpegurl, */*',
+      },
+      httpsAgent: new (require('https').Agent)({ rejectUnauthorized: false }),
+      responseType: 'text',
+      validateStatus: () => true,
+    };
+    const res = await axios.get<string>(url, cfg as any);
+    if (res.status !== 200) {
+      throw new Error(`Lecture M3U échouée (HTTP ${res.status})`);
+    }
+    const body = String(res.data || '');
+    if (!body.includes('#EXTM3U')) throw new Error('Fichier M3U invalide (manque #EXTM3U)');
+    const entries = (body.match(/#EXTINF:/g) || []).length;
+    if (entries <= 0) throw new Error('Playlist M3U vide (aucune entrée #EXTINF)');
+    return { entries, body };
+  }
+
+  /** Construit l’URL M3U Xtream qui fonctionne réellement (avec fallback) */
+  private async buildXtreamM3UWithFallback(base: string, username: string, password: string): Promise<{ workingUrl: string, entries: number }> {
+    const q = `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
+    const candidates = [
+      `${base}/get.php?${q}&type=m3u_plus&output=m3u8`,
+      `${base}/get.php?${q}&type=m3u&output=m3u8`,
+      `${base}/get.php?${q}&type=m3u_plus&output=ts`,
+      `${base}/get.php?${q}&type=m3u&output=ts`,
+    ];
+
+    let lastErr: any = null;
+    for (const url of candidates) {
+      try {
+        const { entries } = await this.validateM3UNotEmpty(url);
+        return { workingUrl: url, entries };
+      } catch (e) {
+        lastErr = e;
+        this.logger.warn(`M3U candidate KO: ${url} -> ${(e as Error).message}`);
+      }
+    }
+    throw new Error(`Impossible d’obtenir une M3U non vide via Xtream (${lastErr?.message || 'erreur inconnue'})`);
   }
 }
 
