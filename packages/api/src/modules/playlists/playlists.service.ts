@@ -63,7 +63,7 @@ export class PlaylistsService {
     return this.repo.save(entity);
   }
 
-  /** Lier une playlist: M3U directe ou Xtream (converti en M3U) */
+  /** Lier une playlist: M3U directe ou Xtream (converti en M3U si possible) */
   async link(userId: string, dto: LinkPlaylistDto): Promise<{ ok: true }> {
     if (!userId) throw new Error('userId manquant');
 
@@ -74,7 +74,7 @@ export class PlaylistsService {
       const entity = this.repo.create({
         user_id: userId,
         type: 'M3U',
-        url: m3uUrl, // Conserve l'URL M3U telle quelle (dites-moi si vous la voulez aussi normalisée)
+        url: m3uUrl, // Conserve l'URL M3U telle quelle
         name: dto.name ?? 'M3U',
         active: true,
       } as Partial<Playlist>);
@@ -83,30 +83,45 @@ export class PlaylistsService {
       return { ok: true };
     }
 
-    // Xtream -> tester player_api puis trouver une URL M3U fonctionnelle
+    // Xtream -> tester player_api puis tenter de trouver une URL M3U fonctionnelle
     if (!dto.base_url || !dto.username || !dto.password) {
       throw new Error('Les champs base_url, username et password sont requis pour Xtream.');
     }
 
     const { base } = await this.assertValidXtream(dto.base_url, dto.username, dto.password);
 
-    // Tente plusieurs variantes (protocole, ports, chemins, paramètres) jusqu’à trouver une M3U non vide
-    const { workingUrl, entries } = await this.buildXtreamM3UWithFallback(base, dto.username, dto.password);
-    this.logger.log(`XTREAM M3U choisie: ${workingUrl} (${entries} entrées)`);
+    // On tente de récupérer une M3U. En cas d’échec (404), on n’échoue plus la liaison.
+    let workingUrl: string | undefined;
+    let entries = 0;
+    try {
+      const res = await this.buildXtreamM3UWithFallback(base, dto.username, dto.password);
+      workingUrl = res.workingUrl;
+      entries = res.entries;
+      this.logger.log(`XTREAM M3U choisie: ${workingUrl} (${entries} entrées)`);
+    } catch (e: any) {
+      this.logger.warn(
+        `Aucune M3U accessible via get.php (${e?.message || e}). On enregistre l’abonnement en mode XTREAM (base publique).`
+      );
+    }
 
-    // Enregistre UNIQUEMENT l’URL publique sans port ni chemin, en HTTPS (ex: https://noos.vip)
+    // Enregistre selon ce qu’on a trouvé:
+    // - Si une M3U fonctionne: type=M3U, url=workingUrl
+    // - Sinon: type=XTREAM, url=base publique sans port/chemin (ex: https://noos.vip)
     const publicBase = this.sanitizePublicBaseUrl(base);
-
     const entity = this.repo.create({
       user_id: userId,
-      type: 'M3U', // côté app on consomme du M3U
-      url: publicBase, // Exigence: pas de port, pas de chemin
+      type: workingUrl ? 'M3U' : 'XTREAM',
+      url: workingUrl ?? publicBase,
       name: dto.name ?? `Xtream: ${stripProtocol(publicBase)}`,
       active: true,
     } as Partial<Playlist>);
 
     await this.activateNew(userId, entity);
-    this.logger.log(`XTREAM lié (public=${publicBase}, validé via get.php)`);
+    this.logger.log(
+      workingUrl
+        ? `XTREAM lié en M3U (${entries} entrées).`
+        : `XTREAM lié sans M3U (url publique=${publicBase}).`
+    );
 
     return { ok: true };
   }
