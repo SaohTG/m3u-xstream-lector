@@ -1,0 +1,29 @@
+{
+  "name": "nova-stream-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "NovaStream Monorepo for TV, Movies and Series streaming",
+  "author": "Jules",
+  "scripts": {
+    "api": "pnpm --filter api",
+    "web": "pnpm --filter web",
+    "shared": "pnpm --filter shared",
+    "dev": "pnpm --parallel dev",
+    "build": "pnpm --recursive build",
+    "start": "pnpm --parallel start",
+    "lint": "pnpm --recursive lint",
+    "test": "pnpm --recursive test",
+    "test:e2e": "pnpm api test:e2e",
+    "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\"",
+    "prepare": "husky install"
+  },
+  "devDependencies": {
+    "husky": "^8.0.3",
+    "prettier": "^3.2.5",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "pnpm": ">=8.0.0"
+  }
+}
