@@ -1,31 +1,31 @@
 # ---------- Builder ----------
-FROM node:20-alpine AS builder
+FROM node:20-slim AS builder
+ENV PNPM_HOME=/root/.local/share/pnpm
+ENV PATH=$PNPM_HOME:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 RUN corepack enable && corepack prepare pnpm@9.10.0 --activate
-WORKDIR /app
 
-# Build-time ARG/ENV pour Next (injecté au bundle client)
 ARG NEXT_PUBLIC_API_BASE_URL
 ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
+ENV NEXT_TELEMETRY_DISABLED=1
 
-# Copie TOUT le monorepo
+WORKDIR /app
 COPY . .
+# Outils build (nécessaires pour sharp/next si prebuilt indisponibles)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  python3 make g++ ca-certificates git \
+  && rm -rf /var/lib/apt/lists/*
 
-# Install à la racine
 RUN pnpm install --no-frozen-lockfile
-
-# Build shared puis web
 RUN pnpm -C packages/shared build
 RUN pnpm -C packages/web build
 
 # ---------- Runner ----------
-FROM node:20-alpine
+FROM node:20-slim
 WORKDIR /app
 ENV NODE_ENV=production
-
-# Next.js output
+ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=builder /app/packages/web/.next /app/.next
 COPY --from=builder /app/packages/web/package.json /app/package.json
 COPY --from=builder /app/node_modules /app/node_modules
-
 EXPOSE 3000
 CMD ["node","node_modules/next/dist/bin/next","start","-p","3000"]
