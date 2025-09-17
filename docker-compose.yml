@@ -36,12 +36,12 @@ services:
       context: .
       dockerfile: packages/web/Dockerfile
       args:
-        NEXT_PUBLIC_API_BASE_URL: http://api:4000   # <-- injecté au build Next.js
+        NEXT_PUBLIC_API_BASE_URL: http://api:4000
     container_name: novastream_web
     depends_on: [api]
     environment:
       NODE_ENV: production
-      NEXT_PUBLIC_API_BASE_URL: http://api:4000     # utile si tu rebuilds en runtime
+      NEXT_PUBLIC_API_BASE_URL: http://api:4000
     networks: [novanet]
     ports:
       - "3000:3000"
