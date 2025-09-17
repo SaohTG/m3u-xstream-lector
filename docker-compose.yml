@@ -20,10 +20,9 @@ services:
       dockerfile: packages/api/Dockerfile
     container_name: novastream_api
     depends_on: [db]
-    env_file:
-      - packages/api/.env
     environment:
       NODE_ENV: production
+      PORT: 4000
       DATABASE_URL: postgres://postgres:postgres@db:5432/novastream
       CORS_ORIGIN: http://localhost:3000
       REQUEST_TIMEOUT_MS: 20000
@@ -36,13 +35,13 @@ services:
     build:
       context: .
       dockerfile: packages/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: http://api:4000   # <-- injecté au build Next.js
     container_name: novastream_web
     depends_on: [api]
-    env_file:
-      - packages/web/.env
     environment:
-      NEXT_PUBLIC_API_BASE_URL: http://api:4000
       NODE_ENV: production
+      NEXT_PUBLIC_API_BASE_URL: http://api:4000     # utile si tu rebuilds en runtime
     networks: [novanet]
     ports:
       - "3000:3000"
