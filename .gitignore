@@ -1,0 +1,14 @@
+node_modules
+.pnpm-store
+.env
+.env.*
+dist
+.next
+coverage
+.DS_Store
+**/.turbo
+**/.vercel
+**/.vscode
+packages/api/.env
+packages/web/.env
+postgres-data
