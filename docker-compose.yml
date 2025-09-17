@@ -1,7 +1,10 @@
 version: "3.9"
+
 services:
   db:
     image: postgres:15-alpine
+    container_name: novastream_db
+    restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -9,10 +12,17 @@ services:
     volumes:
       - ./postgres-data:/var/lib/postgresql/data
     networks: [novanet]
-    ports: ["5432:5432"]
+    ports:
+      - "5432:5432"
 
   api:
-    image: ghcr.io/saohTG/novastream-api:latest
+    build:
+      context: .
+      dockerfile: packages/api/Dockerfile
+    container_name: novastream_api
+    restart: unless-stopped
+    depends_on:
+      - db
     environment:
       NODE_ENV: production
       PORT: 4000
@@ -20,18 +30,28 @@ services:
       CORS_ORIGIN: http://localhost:3000
       REQUEST_TIMEOUT_MS: 20000
       DEFAULT_USER_AGENT: Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120 Safari/537.36
-    depends_on: [db]
     networks: [novanet]
-    ports: ["4000:4000"]
+    ports:
+      - "4000:4000"
 
   web:
-    image: ghcr.io/saohTG/novastream-web:latest
+    build:
+      context: .
+      dockerfile: packages/web/Dockerfile
+      args:
+        # injecté AU BUILD pour Next.js (utilisé côté client)
+        NEXT_PUBLIC_API_BASE_URL: http://api:4000
+    container_name: novastream_web
+    restart: unless-stopped
+    depends_on:
+      - api
     environment:
       NODE_ENV: production
+      # utile si tu relances avec un rebuild runtime (pas nécessaire mais inoffensif)
       NEXT_PUBLIC_API_BASE_URL: http://api:4000
-    depends_on: [api]
     networks: [novanet]
-    ports: ["3000:3000"]
+    ports:
+      - "3000:3000"
 
 networks:
   novanet: {}
