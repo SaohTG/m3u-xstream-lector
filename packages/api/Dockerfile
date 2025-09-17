@@ -5,15 +5,21 @@ ENV PATH=$PNPM_HOME:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/u
 RUN corepack enable && corepack prepare pnpm@9.10.0 --activate
 
 WORKDIR /app
-# Copie tout le monorepo pour que pnpm voie le workspace
-COPY . .
-# Outils build si un paquet natif est requis (rare côté API, mais safe)
+# Outils de build (sûr, même si pas toujours nécessaires côté API)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-  python3 make g++ ca-certificates git \
-  && rm -rf /var/lib/apt/lists/*
+  python3 make g++ ca-certificates git curl && \
+  rm -rf /var/lib/apt/lists/*
 
-# Install à la racine (monorepo)
-RUN pnpm install --no-frozen-lockfile
+# Copie TOUT le monorepo (workspace PNPM)
+COPY . .
+
+# DEBUG réseau (facultatif) : montre la version + registry
+RUN node -v && pnpm -v && pnpm config get registry
+
+# Install monorepo (pas de lockfile -> no-frozen-lockfile)
+# En cas d'échec, affiche le log PNPM pour diagnostic
+RUN pnpm install --no-frozen-lockfile --reporter=append-only || (test -f .pnpm-debug.log && cat .pnpm-debug.log; exit 1)
+
 # Build shared puis API
 RUN pnpm -C packages/shared build
 RUN pnpm -C packages/api build
