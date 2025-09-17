@@ -1,4 +1,3 @@
-# ---------- Builder ----------
 FROM node:20-slim AS builder
 ENV PNPM_HOME=/root/.local/share/pnpm
 ENV PATH=$PNPM_HOME:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -9,33 +8,12 @@ ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
 ENV NEXT_TELEMETRY_DISABLED=1
 
 WORKDIR /app
-# Outils build (sharp/next si prebuilt indispo)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-  python3 make g++ ca-certificates git curl && \
-  rm -rf /var/lib/apt/lists/*
+  python3 make g++ ca-certificates git curl && rm -rf /var/lib/apt/lists/*
 
-# Copie TOUT le monorepo (workspace PNPM)
 COPY . .
+# ↓↓↓ Remplace par cette ligne simple (tu peux garder --no-optional si tu veux éviter sharp)
+RUN pnpm install --no-frozen-lockfile --no-optional
 
-# DEBUG
-RUN node -v && pnpm -v && pnpm config get registry
-
-# Install monorepo, en mode "robuste"
-# - no-optional : évite la compilation de certains binaires facultatifs (ex: sharp)
-# - ignore-scripts false (Next n’en a pas besoin, on peut laisser défaut)
-RUN pnpm install --no-frozen-lockfile --no-optional --reporter=append-only || (test -f .pnpm-debug.log && cat .pnpm-debug.log; exit 1)
-
-# Build shared puis web
 RUN pnpm -C packages/shared build
 RUN pnpm -C packages/web build
-
-# ---------- Runner ----------
-FROM node:20-slim
-WORKDIR /app
-ENV NODE_ENV=production
-ENV NEXT_TELEMETRY_DISABLED=1
-COPY --from=builder /app/packages/web/.next /app/.next
-COPY --from=builder /app/packages/web/package.json /app/package.json
-COPY --from=builder /app/node_modules /app/node_modules
-EXPOSE 3000
-CMD ["node","node_modules/next/dist/bin/next","start","-p","3000"]
