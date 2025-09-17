@@ -9,13 +9,23 @@ ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
 ENV NEXT_TELEMETRY_DISABLED=1
 
 WORKDIR /app
-COPY . .
-# Outils build (nécessaires pour sharp/next si prebuilt indisponibles)
+# Outils build (sharp/next si prebuilt indispo)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-  python3 make g++ ca-certificates git \
-  && rm -rf /var/lib/apt/lists/*
+  python3 make g++ ca-certificates git curl && \
+  rm -rf /var/lib/apt/lists/*
 
-RUN pnpm install --no-frozen-lockfile
+# Copie TOUT le monorepo (workspace PNPM)
+COPY . .
+
+# DEBUG
+RUN node -v && pnpm -v && pnpm config get registry
+
+# Install monorepo, en mode "robuste"
+# - no-optional : évite la compilation de certains binaires facultatifs (ex: sharp)
+# - ignore-scripts false (Next n’en a pas besoin, on peut laisser défaut)
+RUN pnpm install --no-frozen-lockfile --no-optional --reporter=append-only || (test -f .pnpm-debug.log && cat .pnpm-debug.log; exit 1)
+
+# Build shared puis web
 RUN pnpm -C packages/shared build
 RUN pnpm -C packages/web build
 
