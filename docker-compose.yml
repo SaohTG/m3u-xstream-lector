@@ -16,16 +16,13 @@ services:
       retries: 20
     restart: unless-stopped
     ports:
-      - "5432:5432"   # optionnel (utile pour debug local)
+      - "5432:5432"
 
   web:
-    build:
-      context: .
-      # dockerfile: Dockerfile   # (laisse par défaut si le Dockerfile est à la racine)
+    image: ghcr.io/saohTG/m3u-xstream-lector:latest
     ports:
       - "3000:3000"
     environment:
-      # Renseigne ces variables dans Portainer (onglet Environment variables)
       DATABASE_URL: ${DATABASE_URL}
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
@@ -37,8 +34,7 @@ services:
       NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
     depends_on:
       - db
-    # Exécute la migration à chaque démarrage, puis lance l'app
-    command: ["sh", "-c", "npx prisma migrate deploy && npm run start"]
+    command: ["sh","-c","npx prisma migrate deploy && npm run start"]
     restart: unless-stopped
 
 volumes:
