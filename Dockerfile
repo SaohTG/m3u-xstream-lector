@@ -2,22 +2,28 @@
 FROM node:20-bookworm AS build
 WORKDIR /app
 
-# Configure NPM pour éviter la casse (peer deps, audit, etc.)
+# NPM + réseau plus tolérants
 ENV NPM_CONFIG_FUND=false \
     NPM_CONFIG_AUDIT=false \
     NPM_CONFIG_PROGRESS=false
-# Évite les erreurs ERESOLVE
-RUN npm config set legacy-peer-deps true
+RUN npm config set legacy-peer-deps true \
+ && npm config set fetch-retries 5 \
+ && npm config set fetch-retry-factor 2 \
+ && npm config set fetch-retry-mintimeout 20000 \
+ && npm config set fetch-retry-maxtimeout 120000 \
+ && npm config set registry https://registry.npmjs.org/
 
-# 1) Installer les deps à partir des manifests
+# Installe les deps (plus robuste si pas de lockfile)
 COPY package.json ./
-# Si tu commits un package-lock.json plus tard, ajoute-le à la ligne COPY ci-dessus.
-RUN npm install --omit=optional --ignore-scripts --no-audit --no-fund --loglevel=verbose
+# Si tu commites un package-lock plus tard, ajoute-le à la ligne COPY ci-dessus et npm ci sera utilisé
+RUN if [ -f package-lock.json ]; then \
+      echo "Using npm ci" && npm ci --no-audit --no-fund ; \
+    else \
+      echo "Using npm install" && npm install --no-audit --no-fund ; \
+    fi
 
-# 2) Copier le reste du code
+# Code + build
 COPY . .
-
-# 3) Générer Prisma + builder Next
 RUN npx prisma generate && npm run build
 
 # ---------- Runtime stage ----------
