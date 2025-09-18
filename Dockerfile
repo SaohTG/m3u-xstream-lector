@@ -1,8 +1,12 @@
 # Build
 FROM node:20-bookworm AS build
 WORKDIR /app
-COPY package.json package-lock.json* pnpm-lock.yaml* yarn.lock* ./
-RUN npm ci --no-audit --no-fund
+
+# Copie uniquement package.json pour installer les deps
+COPY package.json ./
+RUN npm install --no-audit --no-fund
+
+# Puis copie le reste et build
 COPY . .
 RUN npm run build
 
@@ -10,6 +14,6 @@ RUN npm run build
 FROM node:20-bookworm AS runner
 ENV NODE_ENV=production
 WORKDIR /app
-COPY --from=build /app .
+COPY --from=build /app ./
 EXPOSE 3000
 CMD ["npm","run","start"]
