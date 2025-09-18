@@ -16,10 +16,10 @@ services:
       retries: 20
     restart: unless-stopped
     ports:
-      - "5432:5432"
+      - "5432:5432" # optionnel (debug local)
 
   web:
-    image: ghcr.io/saohTG/m3u-xstream-lector:latest
+    image: ghcr.io/saohtg/m3u-xstream-lector:latest
     ports:
       - "3000:3000"
     environment:
