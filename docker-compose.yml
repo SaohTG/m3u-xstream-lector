@@ -15,8 +15,9 @@ services:
       timeout: 3s
       retries: 20
     restart: unless-stopped
+    # (optionnel) expose le port Postgres en local pour debug
     ports:
-      - "5432:5432" # optionnel (debug local)
+      - "5432:5432"
 
   web:
     image: ghcr.io/saohtg/m3u-xstream-lector:latest
@@ -34,6 +35,7 @@ services:
       NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
     depends_on:
       - db
+    # applique les migrations Prisma à chaque démarrage, puis lance l'app
     command: ["sh","-c","npx prisma migrate deploy && npm run start"]
     restart: unless-stopped
 
