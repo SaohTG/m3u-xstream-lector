@@ -2,20 +2,19 @@
 FROM node:20-bookworm AS build
 WORKDIR /app
 
-# NPM + réseau plus tolérants
+# NPM plus tolérant/retry
 ENV NPM_CONFIG_FUND=false \
     NPM_CONFIG_AUDIT=false \
     NPM_CONFIG_PROGRESS=false
 RUN npm config set legacy-peer-deps true \
+ && npm config set registry https://registry.npmjs.org/ \
  && npm config set fetch-retries 5 \
  && npm config set fetch-retry-factor 2 \
  && npm config set fetch-retry-mintimeout 20000 \
- && npm config set fetch-retry-maxtimeout 120000 \
- && npm config set registry https://registry.npmjs.org/
+ && npm config set fetch-retry-maxtimeout 120000
 
-# Installe les deps (plus robuste si pas de lockfile)
-COPY package.json ./
-# Si tu commites un package-lock plus tard, ajoute-le à la ligne COPY ci-dessus et npm ci sera utilisé
+# Dépendances
+COPY package.json package-lock.json* ./
 RUN if [ -f package-lock.json ]; then \
       echo "Using npm ci" && npm ci --no-audit --no-fund ; \
     else \
