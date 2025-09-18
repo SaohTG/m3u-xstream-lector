@@ -2,35 +2,22 @@
 FROM node:20-bookworm AS build
 WORKDIR /app
 
-# Outils requis pour compiler argon2 (node-gyp)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 make g++ \
- && rm -rf /var/lib/apt/lists/*
-
-# Installe les deps
+# Copier manifestes et installer SANS scripts (évite les postinstall)
 COPY package.json ./
-# Utilise npm ci si le lockfile existe, sinon npm install
-# (tu peux ajouter "package-lock.json" dans la ligne COPY si tu l'as commité)
-RUN if [ -f package-lock.json ]; then \
-      echo "Using npm ci" && npm ci --no-audit --no-fund ; \
-    else \
-      echo "Using npm install" && npm install --no-audit --no-fund ; \
-    fi
+# si tu as un package-lock.json commité, décommente la ligne suivante :
+# COPY package.json package-lock.json ./
+RUN npm install --no-audit --no-fund --ignore-scripts
 
-# Copie le reste du code et build
+# Copier le reste du code
 COPY . .
-RUN npm run build
+
+# Générer Prisma + builder Next
+RUN npx prisma generate && npm run build
 
 # ---------- Runtime stage ----------
 FROM node:20-bookworm AS runner
 ENV NODE_ENV=production
 WORKDIR /app
-
-# Copie l'app buildée
 COPY --from=build /app ./
-
-# Port Next.js
 EXPOSE 3000
-
-# Le compose lance la migration puis start (voir docker-compose)
 CMD ["npm","run","start"]
