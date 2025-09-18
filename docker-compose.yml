@@ -1,18 +1,45 @@
+version: "3.9"
+
 services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: nova
+      POSTGRES_PASSWORD: nova
+      POSTGRES_DB: nova
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nova -d nova || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    ports:
+      - "5432:5432"   # optionnel (utile pour debug local)
+
   web:
-    build: .
+    build:
+      context: .
+      # dockerfile: Dockerfile   # (laisse par défaut si le Dockerfile est à la racine)
     ports:
       - "3000:3000"
     environment:
-      - DATABASE_URL=${DATABASE_URL}
-      - JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET}
-      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
-      - JWT_ACCESS_TTL_SECONDS=${JWT_ACCESS_TTL_SECONDS}
-      - JWT_REFRESH_TTL_SECONDS=${JWT_REFRESH_TTL_SECONDS}
-      - NOVA_CRYPT_KEY_BASE64=${NOVA_CRYPT_KEY_BASE64}
-      - TMDB_API_KEY=${TMDB_API_KEY}
-      - NEXT_PUBLIC_APP_NAME=${NEXT_PUBLIC_APP_NAME}
-      - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
+      # Renseigne ces variables dans Portainer (onglet Environment variables)
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      JWT_ACCESS_TTL_SECONDS: ${JWT_ACCESS_TTL_SECONDS:-900}
+      JWT_REFRESH_TTL_SECONDS: ${JWT_REFRESH_TTL_SECONDS:-1209600}
+      NOVA_CRYPT_KEY_BASE64: ${NOVA_CRYPT_KEY_BASE64}
+      TMDB_API_KEY: ${TMDB_API_KEY}
+      NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-Nova Stream}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
     depends_on:
       - db
+    # Exécute la migration à chaque démarrage, puis lance l'app
+    command: ["sh", "-c", "npx prisma migrate deploy && npm run start"]
     restart: unless-stopped
+
+volumes:
+  pgdata:
