@@ -1,0 +1,80 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  passwordHash  String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  xtreamLink    XtreamLink?
+  refreshTokens RefreshToken[]
+  watchlist     WatchlistItem[]
+  progresses    Progress[]
+  devices       Device[]
+}
+
+model XtreamLink {
+  id           String  @id @default(cuid())
+  userId       String  @unique
+  hostEnc      String  // AES-256-GCM (iv:ciphertext:tag) base64
+  portEnc      String
+  usernameEnc  String
+  passwordEnc  String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  user         User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  deviceId  String
+  ip        String?
+  userAgent String?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device    Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+}
+
+model Device {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  lastSeen  DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshes RefreshToken[]
+}
+
+model WatchlistItem {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String   // movie | series | live
+  contentId String   // Xtream id
+  title     String
+  posterUrl String?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Progress {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String   // movie | episode
+  contentId String
+  season    Int?
+  episode   Int?
+  position  Int      // seconds
+  duration  Int?
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
