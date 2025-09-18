@@ -1,0 +1,80 @@
+@api_url = http://localhost:4000/api
+
+# A valid M3U playlist for testing VOD and Live TV
+@m3u_url = https://iptv-org.github.io/iptv/index.m3u
+# A public Xtream test server
+@xtream_host = http://cms.hybrid-solutions.de:22461
+@xtream_user = test-user-01
+@xtream_pass = test-pass-01
+
+###
+# [API] Health Check
+# @name HealthCheck
+GET {{api_url}}/health
+
+###
+# [PLAYLIST] Link an M3U playlist
+# @name LinkM3U
+POST {{api_url}}/playlists/link
+Content-Type: application/json
+
+{
+    "type": "M3U",
+    "name": "IPTV Org Test",
+    "url": "{{m3u_url}}"
+}
+
+###
+# [PLAYLIST] Link an Xtream playlist
+# @name LinkXtream
+POST {{api_url}}/playlists/link
+Content-Type: application/json
+
+{
+    "type": "XTREAM",
+    "name": "Hybrid Solutions Test",
+    "host": "{{xtream_host}}",
+    "username": "{{xtream_user}}",
+    "password": "{{xtream_pass}}"
+}
+
+###
+# [PLAYLIST] Get the active playlist
+# NOTE: Run after linking a playlist
+# @name GetActivePlaylist
+GET {{api_url}}/playlists/active
+
+###
+# [PLAYLIST] Unlink the active playlist
+# @name UnlinkPlaylist
+POST {{api_url}}/playlists/unlink
+
+###
+# [LIVE] Get Live TV channels
+# NOTE: Make sure a playlist is linked first
+# @name GetLiveChannels
+GET {{api_url}}/live/channels
+
+###
+# [VOD] Get all movies
+# NOTE: Make sure a playlist is linked first
+# @name GetMovies
+GET {{api_url}}/vod/movies
+
+###
+# [VOD] Get all series
+# NOTE: Make sure a playlist is linked first
+# @name GetSeries
+GET {{api_url}}/vod/series
+
+###
+# [VOD] Get movie details
+# NOTE: Get a movie ID from the GetMovies request first
+# @name GetMovieDetails
+GET {{api_url}}/vod/movies/12345
+
+###
+# [VOD] Get series details
+# NOTE: Get a series ID from the GetSeries request first
+# @name GetSeriesDetails
+GET {{api_url}}/vod/series/67890
